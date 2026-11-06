@@ -13,3 +13,5 @@ Date: 2026-11-06. Status: fixed in v1.1.2. Found by: the owner (empty clips for 
 **Proof:** the same test video: clip 8.2 s, 2.6 MB, 3.2 s before the event, 0 parser warnings (before: 0.23 s, 7.6 KB, one warning per frame).
 
 **Side effect:** keyframes that are IDRs let RTSP viewers start within 1 s; the bitrate setting is unchanged.
+
+**Follow-up (v1.6.1):** two events on 2026-11-07, recognized about 3 s after the owner switched cameras (a restart), had an evidence frame but `"clip": ""`. A new log line showed "the video encoder has not started yet": recognition was faster than the encoder's first frame. The event now reserves the clip name and the clip opens at the first keyframe. Test: a video that starts with a face gave "waiting for the video encoder's first keyframe", then a 5.4 s clip linked to the event.

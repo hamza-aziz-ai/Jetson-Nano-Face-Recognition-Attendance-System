@@ -476,6 +476,8 @@ static GstCaps *h264_caps = nullptr;
 static GstClockTime last_pts = 0;
 struct Clip { GstElement *pipe = nullptr, *src = nullptr; GstClockTime base = 0, until = 0; std::string rel; };
 static Clip clip;
+static std::string clip_pending;  // a clip asked for before the encoder had a keyframe; opened at the first one (v_mu)
+static bool clip_open(const std::string &rel);
 
 static void rm_day(const std::string &dir) {
   if (DIR *d = opendir(dir.c_str())) {
@@ -570,6 +572,11 @@ static GstFlowReturn on_h264(GstAppSink *s, gpointer) {
     if (clip.pipe) {
       if (pts > clip.until) clip_finish();
       else clip_push(b, pts);
+    } else if (!clip_pending.empty() && key) {  // an event came before the first keyframe: start its clip now
+      while (!ring.empty() && !ring.front().key) { gst_buffer_unref(ring.front().buf); ring.pop_front(); }
+      std::string rel;
+      rel.swap(clip_pending);
+      clip_open(rel);
     }
   }
   gst_sample_unref(smp);
@@ -577,21 +584,14 @@ static GstFlowReturn on_h264(GstAppSink *s, gpointer) {
 }
 
 // start (or extend) the event clip; returns its path relative to REC_DIR, or "" if recording is unavailable
-static std::string clip_trigger() {
-  if (stopping || !rec_ok()) return "";
-  std::lock_guard<std::mutex> lk(v_mu);
-  if (!h264_caps || ring.empty() || !ring.front().key) return "";
-  if (clip.pipe) { clip.until = last_pts + CLIP_POST; return clip.rel; }
-  std::string day, hms;
-  stamp(day, hms);
-  mkdir((REC_DIR + "/" + day).c_str(), 0755);
-  std::string rel = day + "/" + hms + "_clip.mp4";
+// opens the MP4 writer for clip `rel`, starting with the buffered pre-roll (v_mu held; the ring starts at a keyframe)
+static bool clip_open(const std::string &rel) {
   GError *err = nullptr;
   // A plain file writer: the pre-roll arrives as one burst with past timestamps, so nothing here needs a clock.
   GstElement *p = gst_parse_launch(("appsrc name=s is-live=false format=time max-bytes=20000000 ! h264parse ! "
                                     "mp4mux faststart=true ! filesink sync=false async=false location=" + REC_DIR + "/" +
                                     rel).c_str(), &err);
-  if (!p) { LOGE("clip pipeline: %s", err ? err->message : "?"); if (err) g_error_free(err); return ""; }
+  if (!p) { LOGE("clip pipeline: %s", err ? err->message : "?"); if (err) g_error_free(err); return false; }
   clip.pipe = p;
   clip.src = gst_bin_get_by_name(GST_BIN(p), "s");
   gst_object_unref(clip.src);  // the pipeline keeps it alive
@@ -603,7 +603,28 @@ static std::string clip_trigger() {
   for (auto &a : ring) clip_push(a.buf, a.pts);
   LOGI("clip %s: started with %.1f s before the event (%zu frames buffered)", rel.c_str(),
        (double)(last_pts - clip.base) / GST_SECOND, ring.size());
-  return rel;
+  return true;
+}
+
+// start (or extend) the event clip; returns its path relative to REC_DIR, or "" if recording is unavailable.
+// Right after a (re)start the encoder needs a few seconds before its first frame; a person recognized then (seen when the
+// owner was recognized 3 s after switching cameras) gets a clip that starts at the first keyframe, without pre-roll.
+static std::string clip_trigger() {
+  if (stopping || !rec_ok()) return "";
+  std::lock_guard<std::mutex> lk(v_mu);
+  while (!ring.empty() && !ring.front().key) { gst_buffer_unref(ring.front().buf); ring.pop_front(); }
+  if (clip.pipe) { clip.until = last_pts + CLIP_POST; return clip.rel; }
+  if (!clip_pending.empty()) return clip_pending;
+  std::string day, hms;
+  stamp(day, hms);
+  mkdir((REC_DIR + "/" + day).c_str(), 0755);
+  std::string rel = day + "/" + hms + "_clip.mp4";
+  if (!h264_caps || ring.empty()) {
+    clip_pending = rel;
+    LOGI("clip %s: waiting for the video encoder's first keyframe", rel.c_str());
+    return rel;
+  }
+  return clip_open(rel) ? rel : "";
 }
 
 static std::string save_evidence(guint64 track, GstClockTime after) {
