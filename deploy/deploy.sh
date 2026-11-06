@@ -1,18 +1,19 @@
 #!/bin/sh
 # Build, test, package and install a release on the Jetson Nano, with automatic rollback.
-# Runs on the Nano (by the self-hosted runner, or by hand). Usage: sh deploy/deploy.sh vX.Y.Z [app_dir]
+# Runs on the Nano (by the self-hosted runner, or by hand). Usage: sh deploy/deploy.sh vX.Y.Z <app_dir>
+# The repository URL comes from REPO_URL, else from this checkout's git remote.
 #   1. clean build of the tag from the public repository   2. self-tests and version check
 #   3. release assets in $DIST (tarball + SHA256SUMS)       4. install over app_dir, keeping config, data and models
 #   5. restart services; healthy = both active and status.json reports the new version within 60 s, else roll back
 set -eu
 TAG=$1
-APP=${2:-/home/hamza/facepipe}
-REPO_URL=${REPO_URL:-https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System.git}
+APP=$(cd "$2" && pwd)
+REPO_URL=${REPO_URL:-$(git -C "$(dirname "$0")" remote get-url origin)}
 VER=${TAG#v}
 WORK=$(mktemp -d)
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
-FILES="facepipe facepipe-enroll web.py VERSION pgie_scrfd.txt facepipe.service facepipe-web.service facepipe.env.example check_vs_rest.py"
+FILES="facepipe facepipe-enroll web.py VERSION pgie_scrfd.txt facepipe.env.example check_vs_rest.py"
 
 echo "== build $TAG"
 git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
@@ -28,6 +29,7 @@ FACEPIPE_DATA="$WORK/testdata" python3 web.py --selftest
 echo "== package"
 mkdir -p "$DIST" "$WORK/pkg/facepipe-$VER"
 cp $FILES README.md CHANGELOG.md "$WORK/pkg/facepipe-$VER/"
+cp -r deploy tools "$WORK/pkg/facepipe-$VER/"
 NAME="facepipe-$VER-jetson-nano-jetpack4.6-arm64.tar.gz"
 tar -C "$WORK/pkg" -czf "$DIST/$NAME" "facepipe-$VER"
 (cd "$DIST" && sha256sum "$NAME" > SHA256SUMS && cat SHA256SUMS)

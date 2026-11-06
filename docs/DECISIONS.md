@@ -246,3 +246,8 @@ Trade-off: Assets exist only for releases deployed while the runner is registere
 Revisit if: Docker is used on a Jetson, or a central host runs the pipeline.
 
 Runner security (owner: block pull requests from anyone else): the Deploy workflow triggers only on published releases and manual dispatch, never on pull requests; it uses the `production` environment; workflows from outside contributors need the maintainer's approval (repository setting); the job is skipped unless the repository variable `NANO_RUNNER` is `true`.
+
+## D-027: Portable install with no user or device data (owner)
+Chosen: anyone with a Jetson Nano on JetPack 4.6 and DeepStream 6.0 installs with `sh deploy/install.sh` from any folder. systemd units are templates filled with the current user and folder; every path defaults to the app folder; the Makefile uses the system OpenCV (JetPack 4.1.1) unless `OPENCV_PC` points at a custom build; `deploy.sh` takes the app folder as an argument and reads the repository URL from its checkout; `tools/reshape_scrfd.py` reproduces the detector model byte for byte (md5 be7f0a4616d911b072ac980ac45988c2, the same as the deployed model). CI fails on any `/home/<name>/` path.
+Why: Owner request: the repository must not depend on the owner's username or other data, and must run on another Nano with minimal changes.
+Trade-off: The two models still have to be obtained by hand (InsightFace license); the install script checks for them and says where they come from.

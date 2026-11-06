@@ -16,6 +16,7 @@
 ## Owner rules
 
 - Build from source on the Nano; no Docker on the Nano.
+- Portable: nothing may depend on one user or device. Units are templates filled in by `deploy/install.sh`; paths default to the app folder; CI fails on personal home paths.
 - Ask before persistence changes (boot config, fstab, systemd units, shell profiles), with the exact commands.
 - No passwords typed by the AI; the owner sets logins.
 - Mask IP addresses in anything shared; never commit secrets, face photos or attendance data.

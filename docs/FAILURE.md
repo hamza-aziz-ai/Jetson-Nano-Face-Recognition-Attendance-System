@@ -16,4 +16,4 @@ Marked **seen** where it actually happened on the device, otherwise **from the c
 | Gallery file damaged | Lines skipped | Fewer photos in `gallery ... N photos` | Re-run enrollment |
 | Power loss at MAXN | Board resets | Uptime resets (**seen** once) | Services start on boot; fix: 5V 4A supply and fan |
 | External SSD missing | Formerly: services could not start (**seen**) | | App moved to the microSD; SSD no longer used |
-| Clock wrong | Events on the wrong day | Wrong times on the page | NTP keeps it synced; `TZ=Asia/Kolkata` in the env file |
+| Clock wrong | Events on the wrong day | Wrong times on the page | NTP keeps it synced; set `TZ` in `facepipe.env` if the system clock is UTC |

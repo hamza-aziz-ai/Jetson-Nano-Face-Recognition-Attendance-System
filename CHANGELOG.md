@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- `deploy/install.sh`: one-step install on any Jetson Nano with JetPack 4.6 and DeepStream 6.0 (build, TensorRT engines, self-tests, `facepipe.env`, systemd services for the current user and folder).
+- `tools/reshape_scrfd.py`: makes the 640x384 SCRFD model, byte-identical to the InsightFace-REST reshape.
+
+### Changed
+
+- Portable: no user names or personal paths anywhere. systemd units are templates (`deploy/*.service.in`); the data folder defaults to `<app folder>/data`; the Makefile uses the system OpenCV unless `OPENCV_PC` is set; `deploy.sh` takes the app folder as an argument and the repository from the checkout; CI fails on personal home paths.
+
+### Removed
+
+- `facepipe.service` and `facepipe-web.service` at the repository root (replaced by the templates).
+
 - Release assets and automated deploy: on each published release, the self-hosted runner on the Nano builds the tag, runs the self-tests, uploads `facepipe-X.Y.Z-jetson-nano-jetpack4.6-arm64.tar.gz` and `SHA256SUMS` to the release, installs it and rolls back automatically if the new version is not healthy within 60 s (`deploy/deploy.sh`, `.github/workflows/deploy.yml`). Off until the repository variable `NANO_RUNNER` is set.
 
 - Face matching metric toggle: `FACEPIPE_METRIC=cosine` (default, `FACEPIPE_MATCH` 0.5) or `l2` (`FACEPIPE_L2_MATCH` 0.95), the same settings as the CCTV system. Events record the metric and the L2 distance. `facepipe --selftest` checks the match rule.

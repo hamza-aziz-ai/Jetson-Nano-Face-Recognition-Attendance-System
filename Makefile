@@ -1,8 +1,9 @@
 DS ?= /opt/nvidia/deepstream/deepstream-6.0
 CUDA ?= /usr/local/cuda-10.2
-OPENCV_PC ?= /opt/opencv-4.9.0-cuda/lib/pkgconfig
+# OpenCV: the system one by default (JetPack 4.6 ships 4.1.1); for a custom build set OPENCV_PC=<its lib/pkgconfig>
+OPENCV_PC ?=
 OPENCV_PKG ?= opencv4
-OCV = /opt/opencv-4.9.0-cuda/lib
+OCV = $(shell PKG_CONFIG_PATH=$(OPENCV_PC) pkg-config --variable=libdir $(OPENCV_PKG))
 # extra include dirs, e.g. TensorRT headers outside the default path (used by CI)
 EXTRA_INC ?=
 # CI uses -isystem so warnings inside NVIDIA headers do not fail -Werror (they are system headers on the device)

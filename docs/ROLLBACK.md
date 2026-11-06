@@ -9,14 +9,14 @@ Last good commit: see `git log`; every commit on `main` has been deployed and ru
 ## Code
 
 1. `git revert <commit>` (or `git checkout <commit> -- <file>`), push.
-2. On the Nano: copy the files to `/home/hamza/facepipe`, `make all`, `sudo systemctl restart facepipe facepipe-web`.
+2. On the Nano: `sh deploy/deploy.sh vX.Y.Z <app_dir>` for a release, or copy the files into the app folder, `make all`, `sudo systemctl restart facepipe facepipe-web`.
 
 ## Services
 
 | Change | How to undo |
 | --- | --- |
-| Autostart | `sudo systemctl disable --now facepipe facepipe-web`, then `sudo rm /etc/systemd/system/facepipe*.service && sudo systemctl daemon-reload` |
-| Camera or settings | Edit `/home/hamza/facepipe/facepipe.env`, `sudo systemctl restart facepipe` |
+| Autostart (installed by `deploy/install.sh`) | `sudo systemctl disable --now facepipe facepipe-web`, then `sudo rm /etc/systemd/system/facepipe*.service && sudo systemctl daemon-reload` |
+| Camera or settings | Edit `<app_dir>/facepipe.env`, `sudo systemctl restart facepipe` |
 | Gallery | Remove or restore `gallery/<name>/`, run `./facepipe-enroll gallery`; the service reloads it |
 
 ## Device configuration
@@ -29,4 +29,4 @@ Last good commit: see `git log`; every commit on `main` has been deployed and ru
 
 ## Data
 
-Attendance events, snapshots and the gallery are files under `/home/hamza/facepipe/data`; back them up by copying the folder. There is no migration step to undo.
+Attendance events, snapshots and the gallery are files under `<app_dir>/data`; back them up by copying the folder. There is no migration step to undo.

@@ -1,0 +1,16 @@
+[Unit]
+Description=facepipe attendance web page (port from facepipe.env)
+After=network-online.target
+RequiresMountsFor=@APP_DIR@
+
+[Service]
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/facepipe.env
+Environment=FACEPIPE_DIR=@APP_DIR@
+ExecStart=/usr/bin/python3 @APP_DIR@/web.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

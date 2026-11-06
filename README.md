@@ -177,17 +177,14 @@ Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITE
 
 ### Install
 
-1. Put the models in `models/` and build the TensorRT engines there, on the Nano itself:
-   ```sh
-   cd models
-   trtexec --onnx=scrfd_10g_384x640.onnx --fp16 --workspace=1024 --saveEngine=scrfd_384x640_b1.plan
-   trtexec --onnx=w600k_r50.onnx --fp16 --workspace=1024 --minShapes=input.1:1x3x112x112      --optShapes=input.1:8x3x112x112 --maxShapes=input.1:16x3x112x112 --saveEngine=r50_b16.plan
-   ```
-2. Build: `make all` (builds `facepipe` and `facepipe-enroll`, and copies the DeepStream sample IOU tracker config).
-3. Configure: `cp facepipe.env.example facepipe.env` and set the camera and paths.
-4. Enroll: create `gallery/<person_name>/` with a few clear photos each (front, slight left, slight right), then `./facepipe-enroll gallery`.
-5. Logins: `python3 web.py --set-password <user>` for the dashboard; optionally `python3 web.py --set-rtsp-password <user>` for the RTSP stream (without it the RTSP server stays off).
-6. Optional recordings volume, for example a 64 GB ext4 image file:
+1. Clone the repository on the Nano into the folder you want the app in, and put the two models in `models/`:
+   - `w600k_r50.onnx` from InsightFace's `buffalo_l` pack;
+   - `scrfd_10g_384x640.onnx`: take `scrfd_10g_gnkps.onnx` from the InsightFace-REST model zoo and fix its input on any PC with `python3 tools/reshape_scrfd.py scrfd_10g_gnkps.onnx models/scrfd_10g_384x640.onnx` (needs `pip install onnx`).
+2. Run `sh deploy/install.sh`. It builds both binaries against the system OpenCV, builds the TensorRT engines on the device (about 15 minutes, once), runs the self-tests, creates `facepipe.env` from the example, and installs and starts the two systemd services as the current user, from this folder. `sh deploy/install.sh --no-service` stops before the services. Re-running it is safe.
+3. Edit `facepipe.env`: set `FACEPIPE_URI` to your camera (`rtsp://...`, `usb:/dev/video0`, `csi:0` or a file) and, if the clock is UTC, `TZ`. Then `sudo systemctl restart facepipe`.
+4. Set the dashboard login: `python3 web.py --set-password <user>`; optionally the RTSP login: `python3 web.py --set-rtsp-password <user>` (without it the RTSP server stays off).
+5. Enroll people: create `gallery/<person_name>/` with a few clear photos each (front, slight left, slight right), then `./facepipe-enroll gallery`.
+6. Optional recordings volume for event clips and evidence, for example a 64 GB ext4 image file:
    ```sh
    sudo fallocate -l 64G /var/lib/facepipe-rec.img
    sudo mkfs.ext4 -q -L facepipe-rec -m 0 /var/lib/facepipe-rec.img
@@ -195,13 +192,9 @@ Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITE
    echo '/var/lib/facepipe-rec.img /mnt/rec ext4 loop,nofail,noatime 0 2' | sudo tee -a /etc/fstab
    sudo mount /mnt/rec && sudo chown $USER:$USER /mnt/rec
    ```
-7. Services (edit `User=` and paths first):
-   ```sh
-   sudo cp facepipe.service facepipe-web.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now facepipe.service facepipe-web.service
-   ```
-8. Open `http://<nano>:8000`. Logs: `sudo journalctl -u facepipe -f`.
+7. Open `http://<nano>:8000`. Logs: `sudo journalctl -u facepipe -f`. Updates: `sh deploy/deploy.sh vX.Y.Z <app folder>` builds, tests and installs a release, and rolls back if it is unhealthy.
+
+Using a custom OpenCV build (for example with CUDA) instead of the system one: `make all OPENCV_PC=<its lib/pkgconfig>`.
 
 ### Configuration
 
@@ -226,7 +219,10 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | `web.py` | Dashboard, CSV export, live MJPEG view, evidence files, login management |
 | `pgie_scrfd.txt` | `nvinfer` configuration for the detector |
 | `facepipe.env.example` | All runtime settings |
-| `facepipe.service`, `facepipe-web.service` | systemd units |
+| `deploy/install.sh` | One-step install on a Nano: build, engines, self-tests, `facepipe.env`, systemd services for the current user and folder |
+| `deploy/*.service.in` | systemd unit templates (filled in by `install.sh`) |
+| `deploy/deploy.sh`, `deploy/upload-assets.py` | Release deploy with rollback, and release-asset upload |
+| `tools/reshape_scrfd.py` | Makes the 640x384 SCRFD model from the InsightFace-REST model zoo file |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
 | `Makefile` | Builds both binaries; `make check` compiles without linking (CI) |
 | `VERSION`, `CHANGELOG.md` | Current version and release notes (Semantic Versioning) |

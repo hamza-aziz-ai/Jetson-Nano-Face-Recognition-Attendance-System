@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fail if the repository contains private IP addresses, secret files, biometric data, models or credentials.
+# Fail if the repository contains private IP addresses, secret files, biometric data, models, personal paths or credentials.
 # Usage: sh ci/scan.sh   (from the repo root; scans tracked files)
 set -u
 fail=0
@@ -13,7 +13,11 @@ if [ -n "$bad" ]; then echo "FORBIDDEN FILES:"; echo "$bad"; fail=1; fi
 ips=$(printf '%s\n' "$files" | xargs grep -nIE '\b(192\.168|10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]{1,3}\.[0-9]{1,3}\b' -- 2>/dev/null || true)
 if [ -n "$ips" ]; then echo "PRIVATE IP ADDRESSES:"; echo "$ips"; fail=1; fi
 
-# 3. credentials
+# 3. personal paths: nothing may depend on one user's home folder
+homes=$(printf '%s\n' "$files" | xargs grep -nIE '/home/[a-z_][a-z0-9_-]*/' -- 2>/dev/null || true)
+if [ -n "$homes" ]; then echo "PERSONAL PATHS:"; echo "$homes"; fail=1; fi
+
+# 4. credentials
 creds=$(printf '%s\n' "$files" | xargs grep -nIE 'BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}' -- 2>/dev/null || true)
 if [ -n "$creds" ]; then echo "CREDENTIALS:"; echo "$creds"; fail=1; fi
 

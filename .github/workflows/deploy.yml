@@ -1,7 +1,8 @@
 name: Deploy to Nano
 
 # Runs on the self-hosted runner on the Jetson Nano. Only published releases (made from tags the owner pushes)
-# or a manual dispatch start it; pull requests never do. Off until the repository variable NANO_RUNNER is "true".
+# or a manual dispatch start it; pull requests never do. Off until the repository variable NANO_RUNNER is "true";
+# NANO_APP_DIR is the app folder on the Nano.
 on:
   release:
     types: [published]
@@ -28,6 +29,8 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      APP_DIR: ${{ vars.NANO_APP_DIR }}
+      REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
     steps:
       # plain shell: GitHub's JavaScript actions need a newer glibc than Ubuntu 18.04 has
       - name: Fetch the deploy scripts of this tag
@@ -35,7 +38,7 @@ jobs:
           rm -rf deploy-src
           git clone -q --depth 1 --branch "$TAG" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" deploy-src
       - name: Build, test, package, install, health check (rolls back on failure)
-        run: DIST="$PWD/dist" sh deploy-src/deploy/deploy.sh "$TAG"
+        run: DIST="$PWD/dist" sh deploy-src/deploy/deploy.sh "$TAG" "$APP_DIR"
       - name: Upload release assets
         env:
           GITHUB_TOKEN: ${{ github.token }}

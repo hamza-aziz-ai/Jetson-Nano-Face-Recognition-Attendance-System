@@ -31,7 +31,7 @@ flowchart LR
 
 | Component | What it is | Runs as |
 | --- | --- | --- |
-| `facepipe` | C++ DeepStream 6.0.1 application: capture, detection, tracking, recognition, event log, video outputs, RTSP server | systemd `facepipe.service`, user `hamza` |
+| `facepipe` | C++ DeepStream 6.0.1 application: capture, detection, tracking, recognition, event log, video outputs, RTSP server | systemd `facepipe.service`, as the user who ran `deploy/install.sh` |
 | `facepipe-enroll` | Same source built with `-DFACEPIPE_ENROLL`: photos to gallery | Run by hand |
 | `web.py` | Python 3.6 standard-library HTTP server: dashboard, CSV, live view, evidence files | systemd `facepipe-web.service` |
 | `models/` | SCRFD-10G (640x384) and ArcFace w600k_r50, ONNX plus TensorRT FP16 engines built on the device | Files |

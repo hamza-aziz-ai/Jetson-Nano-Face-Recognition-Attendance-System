@@ -2,13 +2,14 @@
 Description=facepipe face attendance (DeepStream, camera from facepipe.env)
 Wants=network-online.target
 After=network-online.target
-RequiresMountsFor=/home
+RequiresMountsFor=@APP_DIR@
 
 [Service]
-User=hamza
-WorkingDirectory=/home/hamza/facepipe
-EnvironmentFile=/home/hamza/facepipe/facepipe.env
-ExecStart=/home/hamza/facepipe/facepipe ${FACEPIPE_URI} ${FACEPIPE_MUX_W} ${FACEPIPE_MUX_H}
+User=@USER@
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/facepipe.env
+Environment=FACEPIPE_DIR=@APP_DIR@
+ExecStart=@APP_DIR@/facepipe ${FACEPIPE_URI} ${FACEPIPE_MUX_W} ${FACEPIPE_MUX_H}
 # camera off, Wi-Fi drop or crash: reconnect after 10 s, forever
 Restart=always
 RestartSec=10

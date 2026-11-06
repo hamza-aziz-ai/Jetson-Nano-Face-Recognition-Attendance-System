@@ -20,7 +20,7 @@ Next: as above.
 
 ## Session summary: 2026-11-06 (model: Claude Opus 5.5)
 
-The system was built from scratch in one day on the owner's Jetson Nano 4 GB (JetPack 4.6.6) and runs unattended as two systemd services from `/home/hamza/facepipe` on the microSD.
+The system was built from scratch in one day on the owner's Jetson Nano 4 GB (JetPack 4.6.6) and runs unattended as two systemd services from the app folder on the microSD.
 
 ### Done
 
