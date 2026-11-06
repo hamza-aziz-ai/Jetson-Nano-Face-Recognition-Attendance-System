@@ -44,4 +44,9 @@ Embeddings vs InsightFace-REST, same images: 0.9705-0.9848 on all 10 photos
 Live match of the enrolled owner:            cosine 0.757 (first try), 0.68-0.73 in a later run
 TensorRT FP16:                               SCRFD 640x384 51.2 ms mean, w600k_r50 batch 1 41.2 ms mean
 Web login:                                   no login 401, wrong login 401, path trick 401
+On the Nano, build of main (system OpenCV):  facepipe --version 0.9.0; facepipe --selftest: selftest ok; web.py --selftest: selftest ok
+CSI HQ Camera (IMX477) 1080p:                [facepipe] fps 15.0 frames 509; as the service with all outputs: fps 12.8, known 6, unknown 1
+CSI recognition (events):                    hamza_aziz 0.693 (l2 0.783), 0.615 (l2 0.877); unknown 0.375 (l2 1.118)
+Event clip (real event):                     h264 1920x1080, duration 8.785 s, 133 frames; evidence JPEG 174,571 bytes
+Evidence label after the fix:                evidence JPEG shows green "hamza aziz 0.62"
 ```

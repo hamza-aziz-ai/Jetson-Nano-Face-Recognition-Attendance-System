@@ -158,7 +158,8 @@ Problems found and solved while building this, each verified on the device:
 | RTSP camera input, detection, tracking, recognition, enrollment | Verified on device with a live camera |
 | Attendance log, dashboard, CSV, login | Verified |
 | NVJPG live frames, NVENC encoding | Verified (encoders running in the service) |
-| Event clips and full-frame evidence, RTSP playback | Implemented; end-to-end test pending |
+| Event clips and full-frame evidence | Verified: clip H.264 1080p, 8.8 s, 133 frames; evidence 1080p JPEG with the name drawn |
+| RTSP stream | Server verified (listening on 8554 with its login); playback in VLC not yet confirmed |
 | USB camera input | Verified: Logitech C270, MJPEG 1280x720 decoded on NVJPG, enrolled person recognized |
 | CSI camera input | Verified: Raspberry Pi HQ Camera (IMX477, R8 removed), 12.8-15 fps with all outputs, enrolled person recognized at cosine 0.62-0.69 |
 

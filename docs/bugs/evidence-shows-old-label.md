@@ -1,6 +1,6 @@
 # Evidence image showed "Recognizing..." instead of the name
 
-Date: 2026-11-06. Status: fixed, re-verification with a face pending.
+Date: 2026-11-06. Status: fixed and verified (an evidence image at 20:10:50 shows the green name label with score 0.62).
 
 **Symptom:** The first real full-frame evidence image (event at 17:29:03, recognized at cosine 0.659) showed the amber "Recognizing..." label, not the name.
 

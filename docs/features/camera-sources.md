@@ -6,8 +6,8 @@ Added 2026-11-06 at the owner's request ("add support for USB cameras and CSI ca
 | --- | --- | --- |
 | `rtsp://...` | uridecodebin, RTSP forced to TCP, NVDEC | Verified (phone camera, 30 fps) |
 | `file:///path.mp4` | uridecodebin, NVDEC | Verified |
-| `usb:/dev/videoN` | v4l2src, `exposure_auto_priority=0`, MJPEG decoded on NVJPG (`FACEPIPE_USB_FORMAT=mjpeg`) or YUY2 converted by nvvideoconvert (`raw`) | Verified (Logitech C270, MJPEG 1280x720) |
-| `csi:N` | nvarguscamerasrc sensor-id N, NV12 in GPU memory | Pipeline verified to build; camera blocked (see bugs/csi-hq-camera-not-detected.md) |
+| `usb:/dev/videoN` (the number can change when a CSI camera is added: the C270 moved from video0 to video1) | v4l2src, `exposure_auto_priority=0`, MJPEG decoded on NVJPG (`FACEPIPE_USB_FORMAT=mjpeg`) or YUY2 converted by nvvideoconvert (`raw`) | Verified (Logitech C270, MJPEG 1280x720) |
+| `csi:N` | nvarguscamerasrc (`bufapi-version=1`) sensor-id N, NV12 in GPU memory | Verified with the Raspberry Pi HQ Camera after R8 removal: recognition at cosine 0.62-0.69 |
 
 Cameras capture at the width and height given on the command line and `FACEPIPE_CAM_FPS`. Frame thinning (`FACEPIPE_DROP`) is a pad probe on the nvstreammux sink, so it works for every source type.
 
