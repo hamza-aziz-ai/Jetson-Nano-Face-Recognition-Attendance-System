@@ -1,8 +1,19 @@
 # Test checklist
 
-A change is done when the relevant checks pass on the device and the real output is recorded here or in the commit. There is no CI: everything below runs on the Nano.
+A change is done when CI is green and the relevant device checks pass, with the real output recorded here or in the commit.
 
-## Checks
+## CI (GitHub Actions, every push and pull request)
+
+| Job | What it runs | Pass looks like |
+| --- | --- | --- |
+| Secrets, IPs and biometric data | `sh ci/scan.sh` | `scan ok: N tracked files, no secrets, IPs or biometric data` |
+| Docs updated with code | Code changes must touch `docs/` or `README.md` | `docs check ok` |
+| Web self-test on Python 3.6 | `ci/python-checks.sh` in `python:3.6-slim` | `selftest ok`, `python checks ok` |
+| Compile against JetPack 4.6 headers | `ci/compile-check.sh` in `ubuntu:18.04`: `make check` (both binaries, `-Werror`), cppcheck | `compile ok`, `cppcheck ok` |
+
+Local run of the same Python job (2026-11-06): `Python 3.6.15`, `selftest ok`, `python checks ok`. `ci/scan.sh` negative test: a planted `rtsp_auth` file and a 192.168 address both failed the scan (exit 1).
+
+## Device checks
 
 | Check | Command | Pass looks like |
 | --- | --- | --- |

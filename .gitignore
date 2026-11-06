@@ -14,3 +14,5 @@ tracker.yml
 *.engine
 __pycache__/
 *.pyc
+# CI header cache
+.jp/

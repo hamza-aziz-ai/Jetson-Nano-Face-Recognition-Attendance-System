@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Secrets, IPs and biometric data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh ci/scan.sh
+
+  docs:
+    name: Docs updated with code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Code changes must update docs/ or README.md in the same change
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then echo "no base, skipped"; exit 0; fi
+          changed=$(git diff --name-only "$BASE" HEAD)
+          echo "$changed"
+          code=$(echo "$changed" | grep -E '^(facepipe\.cpp|web\.py|Makefile|pgie_scrfd\.txt|.*\.service|facepipe\.env\.example|mlops/|deploy/)' || true)
+          docs=$(echo "$changed" | grep -E '^(docs/|README\.md)' || true)
+          if [ -n "$code" ] && [ -z "$docs" ]; then echo "::error::code changed without a docs/ or README.md update"; exit 1; fi
+          echo "docs check ok"
+
+  python:
+    name: Web self-test on Python 3.6
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Python 3.6 is the Nano's version; actions cannot run inside that old image, so it is driven with docker run
+      - run: docker run --rm -v "$PWD:/w" -w /w python:3.6-slim sh ci/python-checks.sh
+
+  compile:
+    name: Compile against JetPack 4.6 headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache JetPack headers
+        uses: actions/cache@v4
+        with:
+          path: .jp
+          key: jetpack-headers-${{ hashFiles('ci/jetpack-headers.sh') }}
+      # Ubuntu 18.04 with GCC 7.5, like the Nano
+      - run: docker run --rm -v "$PWD:/w" -w /w ubuntu:18.04 sh ci/compile-check.sh

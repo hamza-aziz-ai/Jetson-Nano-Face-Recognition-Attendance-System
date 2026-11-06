@@ -175,3 +175,19 @@ Revisit if: false accepts or rejects are seen.
 ## D-019: RTSP over TCP
 Why: Over UDP on Wi-Fi the camera delivered 4-5 fps because of packet loss; TCP gave a steady 30 fps.
 Trade-off: Higher latency when the link stalls.
+
+## D-020: CI compiles against NVIDIA's own JetPack headers (owner chose full compile)
+Options:
+
+1. Light CI only (self-test, static analysis, scans)
+2. Compile inside a JetPack container under ARM emulation
+3. Compile on a normal x86 runner against headers unpacked from NVIDIA's r32.7 arm64 packages
+
+Chosen: 3
+Why: JetPack 4 containers do not contain CUDA or TensorRT (they mount them from a Jetson), so option 2 cannot compile off-device. Headers are architecture-independent; unpacking the official .deb files (SHA-256 checked against NVIDIA's Packages index, no install scripts run) gives a real compile of both binaries in Ubuntu 18.04 with GCC 7.5, cached after the first run.
+Trade-off: No link step in CI (the Jetson libraries are not available); OpenCV in CI is Ubuntu's 3.2 headers, the Nano uses 4.9. Linking happens on the device during deploy.
+Revisit if: a Jetson becomes available as a trusted CI machine for pull requests.
+
+## D-021: Actions drive old images with docker run
+Why: Current GitHub actions (Node 20) need a newer glibc than Ubuntu 18.04 and Python 3.6 images have, so jobs run actions on the host runner and the checks inside `docker run`.
+Trade-off: Slightly longer workflow files.

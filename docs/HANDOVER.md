@@ -2,6 +2,12 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## Update: 2026-11-06 evening (model: Claude Opus 5.5)
+
+Done: CI on GitHub Actions (scan, docs check, Python 3.6 self-test, compile against JetPack 4.6 headers with cppcheck), D-020, D-021. Engineering docs added (Defend What You Ship).
+In progress: MLOps model manifest and checks; deploy through a self-hosted runner on the Nano (owner choice, tags only, outside pull requests blocked); LFW evaluation (download needs owner permission).
+Next: as above.
+
 ## Session summary: 2026-11-06 (model: Claude Opus 5.5)
 
 The system was built from scratch in one day on the owner's Jetson Nano 4 GB (JetPack 4.6.6) and runs unattended as two systemd services from `/home/hamza/facepipe` on the microSD.
