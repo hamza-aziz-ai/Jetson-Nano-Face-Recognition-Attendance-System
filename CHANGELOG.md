@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Maintenance page (owner): when the Nano cannot be reached through the Cloudflare Tunnel, a Cloudflare Worker (`deploy/maintenance/`) shows "Down for maintenance" in the site's look and reloads every 30 s, instead of Cloudflare's error page (D-037).
+
+### Changed
+
+- Remote access without Cloudflare Access (owner, 2026-11-07): the site's own sign-in page is the only lock (D-035 update, docs/REMOTE-ACCESS.md).
+
 ## [1.8.0] - 2026-11-07
 
 ### Added
