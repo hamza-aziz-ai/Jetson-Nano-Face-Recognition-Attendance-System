@@ -190,4 +190,4 @@ Revisit if: a Jetson becomes available as a trusted CI machine for pull requests
 
 ## D-021: Actions drive old images with docker run
 Why: Current GitHub actions (Node 20) need a newer glibc than Ubuntu 18.04 and Python 3.6 images have, so jobs run actions on the host runner and the checks inside `docker run`.
-Trade-off: Slightly longer workflow files.
+Trade-off: Slightly longer workflow files. NVIDIA headers are included with `-isystem` in CI (`INC=-isystem`): TensorRT 8.2's own headers use deprecated APIs and would fail `-Werror` as plain includes, while on the device they are system headers.

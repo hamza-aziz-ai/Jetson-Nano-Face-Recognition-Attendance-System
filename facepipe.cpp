@@ -835,19 +835,20 @@ static int enroll(const std::string &root) {
   Engine det, rec;
   det.load(DET_ENGINE.c_str(), nvinfer1::Dims4{1, 3, NET_H, NET_W});
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
-  std::string tmp = GALLERY + ".tmp";
-  FILE *out = fopen(tmp.c_str(), "w");
-  if (!out) { fprintf(stderr, "cannot write %s\n", tmp.c_str()); return 1; }
-  int ok = 0, bad = 0;
   DIR *d = opendir(root.c_str());
   if (!d) { fprintf(stderr, "cannot open %s\n", root.c_str()); return 1; }
   std::vector<std::string> people;
   while (dirent *e = readdir(d)) if (e->d_name[0] != '.' && e->d_type == DT_DIR) people.push_back(e->d_name);
   closedir(d);
+  std::string tmp = GALLERY + ".tmp";
+  FILE *out = fopen(tmp.c_str(), "w");
+  if (!out) { fprintf(stderr, "cannot write %s\n", tmp.c_str()); return 1; }
+  int ok = 0, bad = 0;
   std::sort(people.begin(), people.end());
   for (auto &name : people) {
     if (name.find('\t') != std::string::npos || name.find('\n') != std::string::npos) continue;
     DIR *pd = opendir((root + "/" + name).c_str());
+    if (!pd) { fprintf(stderr, "  skip %s: cannot open folder\n", name.c_str()); continue; }
     std::vector<std::string> files;
     while (dirent *e = readdir(pd)) {
       std::string f = e->d_name, lo = f;
