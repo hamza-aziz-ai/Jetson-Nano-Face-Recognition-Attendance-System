@@ -171,10 +171,10 @@
       return fetch("/register", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "fetch" } });
     }).then(function (r) { return r.json(); }).then(function (j) {
       if (j.ok) { location.href = j.next; return; }
-      box.textContent = j.error; box.hidden = false; btn.disabled = false; btn.textContent = "Send registration";
+      box.textContent = j.error; box.hidden = false; btn.disabled = false; btn.textContent = "Send Registration";
     }).catch(function () {
       box.textContent = "Could not send; check the connection and try again."; box.hidden = false;
-      btn.disabled = false; btn.textContent = "Send registration";
+      btn.disabled = false; btn.textContent = "Send Registration";
     });
   });
 

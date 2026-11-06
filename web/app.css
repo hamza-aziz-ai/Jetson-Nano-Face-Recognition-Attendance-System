@@ -150,12 +150,14 @@ pre.log{margin:0;padding:1rem 1.25rem;font:12.5px/1.6 ui-monospace,SFMono-Regula
 .dlg::backdrop{background:rgba(11,23,48,.5)}.dlg h2{font-size:1.1rem;margin:0 0 .45rem}.dlg p{margin:0 0 1.3rem;color:var(--muted)}
 .dlg-actions{display:flex;justify-content:flex-end;gap:.5rem}
 
-/* ---- public pages (registration) ---- */
-html{background:var(--bg)}body.public{min-height:100vh;background:var(--bg) linear-gradient(180deg,#0b1730 0,#0b1730 230px,var(--bg) 230px) no-repeat}
-.pub-head{max-width:680px;margin:0 auto;padding:1.4rem 1.2rem}
-.pub-main{max-width:680px;padding-top:.2rem}.pub-main h1{color:#fff}.pub-main>.sub{color:#b8c4dc}
-.pub-main section{box-shadow:var(--shadow-lg)}
-.pub-foot{text-align:center;color:var(--muted);font-size:.82rem;padding:0 1rem 2rem}
+/* ---- public pages (registration): one dark backdrop, the card centred on it ---- */
+html{background:var(--bg)}
+body.public{min-height:100vh;display:flex;flex-direction:column;background:linear-gradient(160deg,#0b1730 0%,#13244a 60%,#1d3466 100%) fixed}
+.pub-head{width:100%;max-width:680px;margin:0 auto;padding:1.4rem 1.2rem 0}
+.pub-main{flex:1;display:flex;flex-direction:column;justify-content:center;max-width:680px;padding-top:1rem;padding-bottom:1rem}
+.pub-main h1{color:#fff}.pub-main>.sub{color:#b8c4dc}.pub-main section{box-shadow:var(--shadow-lg);margin-bottom:0}
+.pub-foot{text-align:center;color:#8ea0c4;font-size:.82rem;padding:1.2rem 1rem 1.6rem}
+.btn.submit{justify-content:center;padding:.7rem 1rem;font-size:.95rem}
 
 /* ---- small screens: the sidebar becomes a menu ---- */
 @media (max-width:900px){

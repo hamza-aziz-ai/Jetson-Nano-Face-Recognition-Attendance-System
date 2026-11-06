@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-07
+
+### Changed
+
+- Overview and Attendance show an enrolled person's own picture (profile photo) instead of the camera's face crop; the crop stays in the evidence frame, and unknown faces keep their crop (owner's request).
+- Registration page: the whole page is one dark backdrop with the card centred (no large empty area below), and the button reads "Send Registration", centred (owner's review).
+
 ## [1.6.1] - 2026-11-07
 
 ### Fixed
@@ -209,7 +216,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.1...v1.5.0

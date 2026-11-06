@@ -268,6 +268,14 @@ def evidence(e):
     return " &middot; ".join(out) or "<span class='muted'>&ndash;</span>"
 
 
+def face(e, gal):
+    """an enrolled person's own picture (profile photo); the camera's face crop only for unknown or no-longer-enrolled
+    faces. The crop of a known person stays one click away in the evidence frame (owner's choice)."""
+    if e["name"] in gal:
+        return avatar(e["name"], gal)
+    return "<img class='av' src='/snap/%s' alt=''>" % esc(e["snap"])
+
+
 def avatar(n, gal):
     return "<img class='av' src='/photo/%s' alt='' loading='lazy'>" % quote(n) if n in gal else "<span class='av'></span>"
 
@@ -293,9 +301,8 @@ def page_overview():
     st = status()
     recent = sorted(events, key=lambda e: e["ts"], reverse=True)[:8]
     rows = "".join(
-        "<tr><td><div class='who'><img class='av' src='/snap/%s' alt=''>%s</div></td><td class='num'>%s</td>"
-        "<td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
-        % (esc(e["snap"]), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
+        "<tr><td><div class='who'>%s%s</div></td><td class='num'>%s</td><td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
+        % (face(e, gal), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
            e["score"], evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
     act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match</th>"
            "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % rows) if rows else \
@@ -336,10 +343,10 @@ def page_attendance(day, today):
     rows = []
     for n, p in sorted(people.items(), key=lambda kv: kv[1]["first"]):
         rows.append(
-            "<tr data-name='%s'><td data-v='%s'><div class='who'><img class='av' src='/snap/%s' alt='Face seen at %s'>%s%s</div></td>"
+            "<tr data-name='%s'><td data-v='%s'><div class='who'>%s%s%s</div></td>"
             "<td class='num' data-v='%s'>%s</td><td class='num' data-v='%s'>%s</td><td class='num' data-v='%d'>%d</td>"
             "<td class='num' data-v='%.3f'><meter min='0' max='1' value='%.3f'></meter>%.2f</td><td class='ev'>%s</td></tr>"
-            % (esc(display_name(n).lower()), esc(display_name(n).lower()), esc(p["snap"]), hms(p["first"]), esc(display_name(n)),
+            % (esc(display_name(n).lower()), esc(display_name(n).lower()), face({"name": n, "snap": p["snap"]}, gal), esc(display_name(n)),
                "" if n in gal else " <small>(no longer enrolled)</small>", p["first"], hms(p["first"]), p["last"], hms(p["last"]),
                p["sightings"], p["sightings"], p["best"], max(0.0, min(1.0, p["best"])), p["best"], evidence(p)))
     present = (
@@ -950,7 +957,7 @@ def page_register(invite, token="", error="", name=""):
 <div class="previews" id="previews"></div>
 <small class="muted">Clear photos of your face only, in good light, without sunglasses: one from the front, one turned slightly left, one slightly right.</small></div>
 <label class="check"><input type="checkbox" name="consent" value="yes" required><span>%s</span></label>
-<button class="btn primary" type="submit">Send registration</button>
+<button class="btn primary submit" type="submit">Send Registration</button>
 </form></section>""" % ("Update your photos" if update else "Registration", who, "" if error else " hidden", esc(error),
                         esc(token), name_field, MIN_PHOTOS, MAX_PHOTOS, esc(CONSENT_TEXT))
     return public_page("Registration", body)
