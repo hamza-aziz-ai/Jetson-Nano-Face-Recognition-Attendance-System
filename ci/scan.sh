@@ -21,5 +21,8 @@ if [ -n "$homes" ]; then echo "PERSONAL PATHS:"; echo "$homes"; fail=1; fi
 creds=$(printf '%s\n' "$files" | xargs grep -nIE 'BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}' -- 2>/dev/null || true)
 if [ -n "$creds" ]; then echo "CREDENTIALS:"; echo "$creds"; fail=1; fi
 
+# 5. agent instructions: CLAUDE.md and AGENTS.md must match except the line naming the other file
+if [ "$(grep -v '^Keep this file and' CLAUDE.md)" != "$(grep -v '^Keep this file and' AGENTS.md)" ]; then echo "CLAUDE.md and AGENTS.md differ"; fail=1; fi
+
 [ $fail -eq 0 ] && echo "scan ok: $(printf '%s\n' "$files" | wc -l) tracked files, no secrets, IPs or biometric data"
 exit $fail
