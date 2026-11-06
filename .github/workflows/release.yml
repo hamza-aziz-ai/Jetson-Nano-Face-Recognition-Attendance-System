@@ -1,32 +1,56 @@
 name: Release
 
+# A release is made when a merged change to main raises VERSION (D-032): CI runs again on that commit, then the tag
+# vX.Y.Z is created on it with the CHANGELOG section as notes. Devices deploy it by themselves (D-031).
+# workflow_dispatch retries a release that failed.
 on:
   push:
-    tags: ['v*.*.*']
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  check:
+    name: New version with a CHANGELOG section
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          v="$(cat VERSION)"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "v$v is already released"; echo "new=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ && f {exit} f' CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || { echo "::error::CHANGELOG.md has no section for $v"; exit 1; }
+          echo "new=true" >> "$GITHUB_OUTPUT"
+
   ci:
+    needs: check
+    if: needs.check.outputs.new == 'true'
     uses: ./.github/workflows/ci.yml
 
   release:
     name: Publish GitHub Release
-    needs: ci
+    needs: [check, ci]
+    if: needs.check.outputs.new == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Tag must match VERSION and have a CHANGELOG section
-        run: |
-          v="${GITHUB_REF_NAME#v}"
-          [ "$v" = "$(cat VERSION)" ] || { echo "::error::tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"; exit 1; }
-          awk -v v="$v" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ && f {exit} f' CHANGELOG.md > notes.md
-          grep -q '[^[:space:]]' notes.md || { echo "::error::CHANGELOG.md has no section for $v"; exit 1; }
-          cat notes.md
-      - name: Create the release
+      - name: Tag this commit and publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "facepipe $GITHUB_REF_NAME" --notes-file notes.md
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          v="${TAG#v}"
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ && f {exit} f' CHANGELOG.md > notes.md
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "facepipe $TAG" --notes-file notes.md

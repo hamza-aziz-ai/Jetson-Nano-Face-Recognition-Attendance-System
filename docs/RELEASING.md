@@ -28,4 +28,6 @@ Releases are never edited or deleted. To go back, deploy the previous tag (`git 
 
 ## Automatic deployment (D-031)
 
+Releases are made by `.github/workflows/release.yml` when a merged change raises `VERSION` (D-032); nobody tags by hand.
+
 On a device installed with `deploy/install.sh`, `facepipe-update.timer` checks every 10 minutes and deploys a newer published release by itself, with rollback. So publishing the release (pushing a `vX.Y.Z` tag after green CI) is the deployment. Follow it in `logs/<year>/<Month>/update.log`, or run it at once with `sudo systemctl start facepipe-update`.
