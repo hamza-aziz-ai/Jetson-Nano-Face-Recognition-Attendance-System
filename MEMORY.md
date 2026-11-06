@@ -1,6 +1,6 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-06 21:20 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
+Snapshot: **2026-11-06 21:45 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
 
 ## Versions
 
@@ -15,13 +15,9 @@ Snapshot: **2026-11-06 21:20 IST**. Volatile state; verify before acting (see "S
 
 ## In progress
 
-1. **Agreed with Codex in a council (5 exchanges), 2026-11-06, to implement as v1.0.3:**
-   - Idle GPU: replace nvinfer with an own SCRFD probe before nvtracker (reuse `Engine`, `decode_scrfd`, the landmark gate); VIC letterbox + CPU normalize; video buffers never skipped, only inference. Start active; after 10 s without raw detections detect every 6th processed frame (2.5/s); first face restores full rate. Accept only with measured smooth 15 fps on every output; otherwise revisit the split pipeline.
-   - CSI stall (cause unconfirmed): SIGTERM/SIGINT through GLib into one cleanup path (stopping flag, no new jobs/clips/evidence waits, capture to NULL, settle recognition, finalize active and finalizing clips) under a 10 s deadline enforced by the watchdog thread (non-zero exit on timeout, active even with `FACEPIPE_WATCHDOG=0`); fix the watchdog start (exits at ~65 s, not 60); `TimeoutStopSec=15s` in the unit template only (device after owner approval).
-   - `deploy.sh` health: stable `MainPID`, two advancing status reports after that PID appeared, expected version, both services active; window `FACEPIPE_WATCHDOG + 60` s, 120 s when disabled.
-   - Docs: D-028, D-029, D-004 correction, clip pre-roll is relative to the recognition decision, csi-start-stall "mitigated; cause unconfirmed".
-2. **Bug reported by the owner: empty clips.** Several `*_clip.mp4` files are 0 bytes (four unknown events and one known), one is 23 KB for 4.2 s; others are fine. No error is logged because the clip finalizer does not log the bus result. Investigate with that logging first.
-3. Release v1.0.3 and redeploy; repeat the long-run CSI restart test.
+1. **v1.0.3 (this commit):** daily log files in the owner's layout (D-030), clean bounded SIGTERM shutdown and watchdog fix (D-029), deploy health on the current `MainPID` with advancing frames, clip finalization result logged, 12-hour times on the web page. Verified on the Nano in a test instance: self-tests, log file format, clean stop in 2.7 s. Next: CI, tag, deploy with `deploy.sh`, then long-run CSI restart tests.
+2. **Empty clips (owner's report):** five 0-byte `*_clip.mp4` files today (four unknown events, one known), one 23 KB for 4.2 s. v1.0.3 logs how each clip ended; reproduce after deploying (owner in front of the camera; a high `FACEPIPE_MATCH` makes every face unknown).
+3. **v1.1.0: adaptive detection (D-028)**, agreed with Codex: own SCRFD probe replacing nvinfer; idle after 10 s without faces, every 6th frame; accept only with measured smooth 15 fps outputs.
 
 ## Next (owner's request of 2026-11-06, in order)
 

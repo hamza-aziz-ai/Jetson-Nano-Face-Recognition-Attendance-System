@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-06
+
+### Added
+
+- Log files (owner's layout): `logs/<year>/<Month>/facepipe.log`, `web.log` and `enroll.log`, one file per day; at midnight the day's file becomes `<module>.log.DD-Mon-YYYY` in its month folder. Line format `[DD-MM-YYYY] hh:mm:ss.fff AM/PM, Weekday [LEVEL] message`. `FACEPIPE_LOGS` sets the folder.
+- Each clip now logs how it ended: saved with its size, an error with its cause, or not finalized in time.
+- Failed web logins are logged with the client address.
+
+### Changed
+
+- The web page shows times in 12-hour format (09:41 PM); so does the CSV report.
+
+### Fixed
+
+- Stopping the service (SIGTERM) now shuts down cleanly: no new clips, the camera is released (the Argus session is closed, not killed), queued faces are still recorded, the open clip is finalized; a shutdown longer than 10 s is forced (exit 4). Before, the process was killed mid-stream, the most likely cause of the CSI camera stalling on the next start (cause unconfirmed).
+- The frame watchdog fired after about 65 s instead of 60 s.
+- `deploy.sh` could accept a stale status file or a process that produces no frames: health now requires two advancing reports from the current process (systemd `MainPID`), within the watchdog time plus 60 s.
+
 ## [1.0.2] - 2026-11-06
 
 ### Fixed
@@ -78,7 +96,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v0.9.0...v1.0.0

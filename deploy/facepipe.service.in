@@ -13,6 +13,8 @@ ExecStart=@APP_DIR@/facepipe ${FACEPIPE_URI} ${FACEPIPE_MUX_W} ${FACEPIPE_MUX_H}
 # camera off, Wi-Fi drop or crash: reconnect after 10 s, forever
 Restart=always
 RestartSec=10
+# facepipe finishes its own shutdown within 10 s (releases the camera, finalizes the open clip); then SIGKILL
+TimeoutStopSec=15s
 # stdout carries embeddings for debugging; keep them out of the journal
 StandardOutput=null
 StandardError=journal

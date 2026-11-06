@@ -52,3 +52,11 @@ Event clip (real event):                     h264 1920x1080, duration 8.785 s, 1
 Evidence label after the fix:                evidence JPEG shows green "hamza aziz 0.62"
 RTSP in VLC:                                 rtsp://<nano>:8554/live plays with the RTSP login (owner, 2026-11-06)
 ```
+
+v1.0.3 checks on the Nano (2026-11-06):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Self-tests (log line format, 12-hour clock, daily backup and month folders) | `./facepipe --selftest && ./facepipe-enroll --selftest && python3 web.py --selftest` | ok |
+| Log file | test instance on `sample_1080p_h264.mp4` | `logs/2026/November/facepipe.log`, lines like `[06-11-2026] 04:00:59.516 PM, Friday [INFO] fps 6.6 frames 342 ...` |
+| Clean stop | `kill -TERM` on the test instance | `stopping (signal)` then `stopped`, process gone in 2.7 s |

@@ -43,7 +43,7 @@ Options:
 
 Chosen: 2
 Why: The GPU is already the bottleneck (SCRFD); IOU runs on the CPU and is enough for people walking up to a camera.
-Trade-off: More ID switches in crowds or occlusion, which cost extra recognitions, not wrong ones.
+Trade-off: More ID switches in crowds or occlusion. Usually they cost extra recognitions, but an association error can also carry a track's cached name to another person (corrected 2026-11-06 in council D-029).
 Revisit if: crowded scenes cause repeated recognitions.
 
 ## D-005: Recognize once per track, retry unknowns up to 5 times
@@ -251,3 +251,39 @@ Runner security (owner: block pull requests from anyone else): the Deploy workfl
 Chosen: anyone with a Jetson Nano on JetPack 4.6 and DeepStream 6.0 installs with `sh deploy/install.sh` from any folder. systemd units are templates filled with the current user and folder; every path defaults to the app folder; the Makefile uses the system OpenCV (JetPack 4.1.1) unless `OPENCV_PC` points at a custom build; `deploy.sh` takes the app folder as an argument and reads the repository URL from its checkout; `tools/reshape_scrfd.py` reproduces the detector model byte for byte (md5 be7f0a4616d911b072ac980ac45988c2, the same as the deployed model). CI fails on any `/home/<name>/` path.
 Why: Owner request: the repository must not depend on the owner's username or other data, and must run on another Nano with minimal changes.
 Trade-off: The two models still have to be obtained by hand (InsightFace license); the install script checks for them and says where they come from.
+
+## D-028: Adaptive detection that keeps video at 15 fps (owner, council)
+Options:
+
+1. Split pipeline: detection branch and video branch, metadata handed across by timestamp
+2. Own SCRFD call in a probe instead of nvinfer, deciding per frame whether to detect
+3. Two nvinfer instances with different intervals, or restarting the pipeline to change `interval`
+
+Chosen: 2 (owner chose "adaptive, keep video smooth"; design agreed with Codex in a council, 5 exchanges). Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council).
+Why: nvinfer's `interval` is changeable only in NULL or READY state. Option 2 keeps one frame path and reuses `Engine`, `decode_scrfd` and the landmark gate; video buffers are never skipped, only inference. Policy: start active; after 10 s without a raw detection, detect every 6th processed frame (2.5/s); the first face restores full rate. Detector work idle: about 765 to 128 ms per second (arithmetic, not a GPU-load prediction).
+Trade-off: Up to about 400 ms more before the first detection of someone entering an empty scene. Detection runs in the streaming thread, so smoothness must be measured, not assumed.
+Revisit if: measured output cadence falls below 15 fps under recognition load (then option 1). Status: accepted, to implement in v1.1.0.
+
+## D-029: Bounded shutdown and recovery (council)
+Options:
+
+1. Keep being killed by SIGTERM; rely on the watchdog
+2. Handle SIGTERM: one cleanup path, bounded by a deadline the watchdog enforces
+3. Also restart nvargus-daemon automatically
+
+Chosen: 2. Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council).
+Why: The CSI stall followed starts after a long-running process was killed mid-stream; a clean stop closes the Argus session. Order: mark stopping (no new clips or evidence waits), pipeline to NULL, finish queued recognitions, finalize active and finalizing clips; the watchdog thread forces exit 4 after 10 s, also when the frame rule is off. The handler is installed just before the main loop, so a stall before it still dies on SIGTERM at once. `deploy.sh` accepts only reports from the current `MainPID` with advancing frames (Codex: a crashed process's reports could otherwise pass for its stalled replacement).
+Trade-off: A forced exit can lose queued work or an unfinished clip. `TimeoutStopSec=15s` is in the unit template; existing installs keep systemd's default until `install.sh` is re-run with the owner's approval. No automatic nvargus-daemon restart (needs root; recovery by the watchdog was seen).
+Revisit if: the stall recurs with clean stops (then capture a backtrace and consider an nvargus-daemon restart).
+
+## D-030: Daily log files with the owner's layout (owner)
+Options:
+
+1. journald only
+2. logrotate on a single file
+3. Each process writes and rotates its own file
+
+Chosen: 3
+Why: The owner's layout (`logs/<year>/<Month>/<module>.log`, backups `<module>.log.DD-Mon-YYYY` in the month folder, at most 31 a month) and line format (`[DD-MM-YYYY] hh:mm:ss.fff AM/PM, Weekday [LEVEL]`) do not fit logrotate's naming, and logrotate would need a root cron entry. Rotation happens with the first line after midnight; a file left by a run that ended before midnight is renamed by date at the next start; a second run on the same day appends to that day's backup. Lines also go to stderr, so `journalctl` keeps working.
+Trade-off: Prints from libraries (GStreamer, DeepStream, TensorRT plugins) reach only the journal. No deletion of old months: the owner set no retention, and the logs are small (one status line a minute).
+Revisit if: logs fill the microSD, or a retention rule is set.

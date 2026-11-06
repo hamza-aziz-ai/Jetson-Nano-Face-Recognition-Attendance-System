@@ -3,6 +3,7 @@ web_auth
 rtsp_auth
 facepipe.env
 data/
+logs/
 gallery/
 # build outputs and copied vendor config
 facepipe

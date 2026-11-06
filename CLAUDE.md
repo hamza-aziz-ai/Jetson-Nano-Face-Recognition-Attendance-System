@@ -18,6 +18,7 @@ camera (RTSP / file / USB / CSI) -> frame drop probe -> nvstreammux -> SCRFD-10G
   -> nvdsosd -> tee -> NVJPG (live MJPEG + evidence JPEGs)
                    -> NVENC H.264 -> RTSP server :8554/live + ring buffer for event clips
 attendance: data/events-YYYY-MM-DD.jsonl, status.json; web.py reads them
+logs: logs/<year>/<Month>/{facepipe,web,enroll}.log, daily backups <module>.log.DD-Mon-YYYY (D-030)
 ```
 
 Key files:
@@ -66,3 +67,4 @@ sh ci/scan.sh              # run before every commit
 - RTSP input must use TCP; USB webcams need `exposure_auto_priority=0` for full frame rate.
 - `cp` over a running binary fails with "Text file busy": copy beside it and rename.
 - nvinfer `interval` is changeable only in NULL or READY state.
+- Do not call the log macros from inside `log_line` (recursion); library prints go only to the journal.

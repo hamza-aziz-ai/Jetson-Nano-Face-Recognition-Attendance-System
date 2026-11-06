@@ -4,7 +4,8 @@
 # The repository URL comes from REPO_URL, else from this checkout's git remote.
 #   1. clean build of the tag from the public repository   2. self-tests and version check
 #   3. release assets in $DIST (tarball + SHA256SUMS)       4. install over app_dir, keeping config, data and models
-#   5. restart services; healthy = both active and status.json reports the new version within 60 s, else roll back
+#   5. restart services; healthy = both active, and the current facepipe process (systemd MainPID, unchanged) wrote two
+#      status reports with the new version and advancing frames; else roll back. Needs the camera online.
 set -eu
 TAG=$1
 APP=$(cd "$2" && pwd)
@@ -52,13 +53,27 @@ rollback() {
   exit 1
 }
 
-echo "== restart and health check"
+# window: the watchdog (FACEPIPE_WATCHDOG, default 60 s) plus restart and start-up time, so one stalled start can recover
+WD=$(sed -n 's/^FACEPIPE_WATCHDOG=\([0-9]*\).*/\1/p' "$APP/facepipe.env" 2>/dev/null | tail -1)
+WD=${WD:-60}
+if [ "$WD" -gt 0 ]; then WINDOW=$((WD + 60)); else WINDOW=120; fi
+field() { sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p" "$APP/data/status.json" 2>/dev/null; }
+
+echo "== restart and health check (up to ${WINDOW}s)"
 restart_services || rollback
-i=0
-while [ $i -lt 60 ]; do
+i=0; pid=""; seen=0; last_u=""; last_f=""
+while [ $i -lt $WINDOW ]; do
   sleep 2; i=$((i + 2))
   systemctl is-active -q facepipe && systemctl is-active -q facepipe-web || continue
-  # the camera may be offline, so health is "running the new version", not "frames flowing"
-  grep -q "\"version\":\"$VER\"" "$APP/data/status.json" 2>/dev/null && { echo "healthy: facepipe $VER after ${i}s"; echo "$DIST"; exit 0; }
+  p=$(systemctl show -p MainPID --value facepipe)
+  # a new process (first start or a restart by the watchdog): only its own reports count
+  if [ "$p" != "$pid" ]; then pid=$p; seen=$(date +%s); last_u=""; continue; fi
+  grep -q "\"version\":\"$VER\"" "$APP/data/status.json" 2>/dev/null || continue
+  u=$(field updated); f=$(field frames)
+  [ -n "$u" ] && [ -n "$f" ] && [ "$u" -ge "$seen" ] || continue
+  if [ -n "$last_u" ] && [ "$u" -gt "$last_u" ] && [ "$f" -gt "$last_f" ]; then
+    echo "healthy: facepipe $VER (pid $pid) at $f frames after ${i}s"; echo "$DIST"; exit 0
+  fi
+  last_u=$u; last_f=$f
 done
 rollback

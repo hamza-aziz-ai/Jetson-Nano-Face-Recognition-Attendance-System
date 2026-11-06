@@ -18,3 +18,5 @@ Marked **seen** where it actually happened on the device, otherwise **from the c
 | External SSD missing | Formerly: services could not start (**seen**) | | App moved to the microSD; SSD no longer used |
 | Clock wrong | Events on the wrong day | Wrong times on the page | NTP keeps it synced; set `TZ` in `facepipe.env` if the system clock is UTC |
 | CSI camera daemon stalls the pipeline at start | No frames, process looks active | Watchdog log line `no frames for 60 s` (**seen** once, before the watchdog existed) | Watchdog exits, systemd restarts after 10 s; `deploy.sh` waits 3 s between stop and start |
+| Clip finalization | Clip file empty or short | Log line `clip ...: not finalized within 8 s` or `clip ...: <element>: <error>` (empty clips **seen**, cause under investigation) | The event and its evidence frame are kept; the next clip is independent |
+| Shutdown hangs | Service stop takes long | Log line `shutdown did not finish within 10 s, forcing exit` | Exit 4; systemd restarts the service |

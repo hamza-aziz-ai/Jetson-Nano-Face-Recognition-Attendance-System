@@ -17,10 +17,13 @@
 //      FACEPIPE_MATCH (cosine threshold, default 0.5), FACEPIPE_L2_MATCH (L2 distance threshold, default 0.95),
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
 //      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554),
-//      FACEPIPE_WATCHDOG (seconds without frames before exiting, default 60, 0 = off).
-// stdout: one JSON line per recognition attempt (with the embedding); stderr: logs.
+//      FACEPIPE_WATCHDOG (seconds without frames before exiting, default 60, 0 = off),
+//      FACEPIPE_LOGS (log folder, default $FACEPIPE_DIR/logs).
+// stdout: one JSON line per recognition attempt (with the embedding); logs: $FACEPIPE_LOGS/<year>/<Month>/facepipe.log
+// (enroll.log for facepipe-enroll), also on stderr for the journal.
 
 #include <gst/gst.h>
+#include <glib-unix.h>
 #include <gst/app/gstappsink.h>
 #include <gst/app/gstappsrc.h>
 #include <cuda_runtime.h>
@@ -39,6 +42,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -50,6 +54,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/time.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -72,6 +77,107 @@ static const float ARC_DST[5][2] = {{38.2946f, 51.6963f}, {73.5318f, 51.5014f}, 
                                     {41.5493f, 92.3655f}, {70.7299f, 92.2041f}};
 
 static std::string env(const char *k, const std::string &def) { const char *v = getenv(k); return v && *v ? v : def; }
+
+// ---- logs (owner's layout): $FACEPIPE_LOGS/<year>/<Month>/<module>.log, default $FACEPIPE_DIR/logs. With the first line
+// after local midnight the day's file becomes <module>.log.DD-Mon-YYYY in its own month folder, so a month folder holds
+// at most 31 backups per module. Line: [DD-MM-YYYY] hh:mm:ss.fff AM/PM, Weekday [LEVEL] message.
+// Every line also goes to stderr (the journal). Prints from libraries (GStreamer, DeepStream) reach only the journal.
+static const char *MONTHS[] = {"January", "February", "March",     "April",   "May",      "June",
+                               "July",    "August",   "September", "October", "November", "December"};
+static const char *WEEKDAYS[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+static std::string LOG_ROOT, LOG_MODULE = "facepipe";  // LOG_ROOT empty: stderr only (self-test, before setup)
+
+static std::string log_stamp(const struct tm &t, int ms) {
+  char b[64];
+  int h = t.tm_hour % 12 ? t.tm_hour % 12 : 12;
+  snprintf(b, sizeof b, "[%02d-%02d-%04d] %02d:%02d:%02d.%03d %s, %s", t.tm_mday, t.tm_mon + 1, t.tm_year + 1900, h,
+           t.tm_min, t.tm_sec, ms, t.tm_hour < 12 ? "AM" : "PM", WEEKDAYS[t.tm_wday]);
+  return b;
+}
+static int ymd(const struct tm &t) { return (t.tm_year + 1900) * 10000 + (t.tm_mon + 1) * 100 + t.tm_mday; }
+static std::string log_path(const struct tm &t) {
+  return LOG_ROOT + "/" + std::to_string(t.tm_year + 1900) + "/" + MONTHS[t.tm_mon] + "/" + LOG_MODULE + ".log";
+}
+static std::string log_backup_name(const std::string &path, const struct tm &day) {
+  char b[24];
+  snprintf(b, sizeof b, ".%02d-%.3s-%04d", day.tm_mday, MONTHS[day.tm_mon], day.tm_year + 1900);
+  return path + b;
+}
+// path becomes its dated backup; appended to it if that day's backup already exists (a restart around midnight)
+static void log_backup(const std::string &path, const struct tm &day) {
+  std::string dst = log_backup_name(path, day);
+  if (access(dst.c_str(), F_OK) != 0) { rename(path.c_str(), dst.c_str()); return; }
+  FILE *in = fopen(path.c_str(), "rb"), *out = fopen(dst.c_str(), "ab");
+  if (in && out) {
+    char b[65536];
+    size_t n;
+    while ((n = fread(b, 1, sizeof b, in)) > 0) fwrite(b, 1, n, out);
+  }
+  if (in) fclose(in);
+  if (out) fclose(out);
+  if (in && out) unlink(path.c_str());
+}
+static std::mutex log_mu;
+static FILE *log_f = nullptr;
+static int log_day = 0;
+static struct tm log_tm;  // the day of the open file
+
+static void log_open(const struct tm &now) {
+  // a file from an earlier day, left by a run that ended before midnight, in this or the previous month's folder
+  for (int back = 0; back < 2; back++) {
+    struct tm m = now;
+    m.tm_mday = 1; m.tm_mon -= back; m.tm_isdst = -1;
+    mktime(&m);
+    std::string p = log_path(m);
+    struct stat st;
+    struct tm ft;
+    if (stat(p.c_str(), &st) == 0 && localtime_r(&st.st_mtime, &ft) && ymd(ft) != ymd(now)) log_backup(p, ft);
+  }
+  std::string y = LOG_ROOT + "/" + std::to_string(now.tm_year + 1900);
+  mkdir(LOG_ROOT.c_str(), 0755);
+  mkdir(y.c_str(), 0755);
+  mkdir((y + "/" + MONTHS[now.tm_mon]).c_str(), 0755);
+  log_f = fopen(log_path(now).c_str(), "a");
+  log_day = ymd(now);
+  log_tm = now;
+}
+
+static void log_line(const char *level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void log_line(const char *level, const char *fmt, ...) {
+  char msg[2048];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof msg, fmt, ap);
+  va_end(ap);
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  struct tm t;
+  localtime_r(&tv.tv_sec, &t);
+  std::lock_guard<std::mutex> lk(log_mu);
+  fprintf(stderr, "[%s] %s\n", level, msg);
+  if (LOG_ROOT.empty()) return;
+  if (ymd(t) != log_day) {
+    if (log_f) { fclose(log_f); log_f = nullptr; log_backup(log_path(log_tm), log_tm); }
+    log_open(t);
+  }
+  if (log_f) { fprintf(log_f, "%s [%s] %s\n", log_stamp(t, (int)(tv.tv_usec / 1000)).c_str(), level, msg); fflush(log_f); }
+}
+#define LOGI(...) log_line("INFO", __VA_ARGS__)
+#define LOGW(...) log_line("WARNING", __VA_ARGS__)
+#define LOGE(...) log_line("ERROR", __VA_ARGS__)
+
+// ---- shutdown (SIGTERM/SIGINT, end of stream or error): one path, bounded by STOP_LIMIT (enforced by the watchdog) ----
+static const int STOP_LIMIT = 10;
+static std::atomic<bool> stopping{false};  // set first: no new clips or evidence waits from then on
+static std::atomic<long> stop_at{0};       // steady-clock second when the shutdown began
+static long steady_s() {
+  return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+static void begin_stop(const char *why) {
+  if (stopping.exchange(true)) return;
+  stop_at = steady_s();
+  LOGI("stopping (%s): releasing the camera, finishing recognition and recordings, at most %d s", why, STOP_LIMIT);
+}
 static std::string DATA_DIR, GALLERY, REC_DIR;
 static const std::string LIVE_DIR = "/dev/shm/facepipe";  // live.jpg for the web page's MJPEG view (RAM, no SSD wear)
 static float MATCH = 0.5f;      // cosine threshold (FACEPIPE_MATCH), used when the metric is cosine
@@ -196,7 +302,7 @@ static cv::Mat umeyama(const float *kps) {
 
 // ---- TensorRT engine with input binding 0 and float outputs ----
 class TrtLog : public nvinfer1::ILogger {
-  void log(Severity s, const char *msg) noexcept override { if (s <= Severity::kWARNING) fprintf(stderr, "[TRT] %s\n", msg); }
+  void log(Severity s, const char *msg) noexcept override { if (s <= Severity::kWARNING) LOGW("TensorRT: %s", msg); }
 } trt_log;
 
 struct Engine {
@@ -211,7 +317,7 @@ struct Engine {
     std::vector<char> blob((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     rt = nvinfer1::createInferRuntime(trt_log);
     eng = rt->deserializeCudaEngine(blob.data(), blob.size());
-    if (!eng) { fprintf(stderr, "cannot load %s\n", path); exit(1); }
+    if (!eng) { LOGE("cannot load %s", path); exit(1); }
     ctx = eng->createExecutionContext();
     if (eng->getBindingDimensions(0).d[0] == -1) ctx->setBindingDimensions(0, in);  // only dynamic engines (ArcFace)
     for (int i = 0; i < eng->getNbBindings(); i++) {
@@ -276,7 +382,7 @@ struct Gallery {
       names.push_back(line.substr(0, tab));
       embs.push_back(e);
     }
-    fprintf(stderr, "[facepipe] gallery %s: %zu photos\n", GALLERY.c_str(), names.size());
+    LOGI("gallery %s: %zu photos", GALLERY.c_str(), names.size());
   }
   std::pair<std::string, float> match(const std::vector<float> &e) const {
     float best = -1;
@@ -392,7 +498,7 @@ static void rotate_storage() {
   char cut[16];
   strftime(cut, sizeof cut, "%Y-%m-%d", &t);
   for (auto &d : days)
-    if (d < cut && d != today) { rm_day(REC_DIR + "/" + d); fprintf(stderr, "[facepipe] storage full: deleted %s\n", d.c_str()); }
+    if (d < cut && d != today) { rm_day(REC_DIR + "/" + d); LOGW("storage full: deleted %s", d.c_str()); }
 }
 
 static void clip_push(GstBuffer *b, GstClockTime pts) {  // v_mu held
@@ -402,18 +508,36 @@ static void clip_push(GstBuffer *b, GstClockTime pts) {  // v_mu held
   gst_app_src_push_buffer(GST_APP_SRC(clip.src), c);
 }
 
+static std::atomic<int> clips_finalizing{0};  // clips whose MP4 index is still being written (shutdown waits for them)
+
 static void clip_finish() {  // v_mu held; mp4mux writes the index on EOS, so wait for it off the streaming thread
   GstElement *p = clip.pipe, *s = clip.src;
+  std::string rel = clip.rel;
   clip = Clip();
+  clips_finalizing++;
   gst_app_src_end_of_stream(GST_APP_SRC(s));
-  std::thread([p] {
+  std::thread([p, rel] {
     GstBus *bus = gst_element_get_bus(p);
-    if (GstMessage *m = gst_bus_timed_pop_filtered(bus, 10 * GST_SECOND, (GstMessageType)(GST_MESSAGE_EOS | GST_MESSAGE_ERROR)))
-      gst_message_unref(m);
+    // 8 s: inside the shutdown budget, so a stop still reports how the clip ended
+    GstMessage *m = gst_bus_timed_pop_filtered(bus, 8 * GST_SECOND, (GstMessageType)(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    if (!m) LOGE("clip %s: not finalized within 8 s, the file may be empty", rel.c_str());
+    else if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_ERROR) {
+      GError *e;
+      gchar *d;
+      gst_message_parse_error(m, &e, &d);
+      LOGE("clip %s: %s: %s (%s)", rel.c_str(), GST_OBJECT_NAME(m->src), e->message, d ? d : "");
+      g_error_free(e);
+      g_free(d);
+    } else {
+      struct stat st;
+      LOGI("clip %s: saved, %lld bytes", rel.c_str(), stat((REC_DIR + "/" + rel).c_str(), &st) == 0 ? (long long)st.st_size : -1LL);
+    }
+    if (m) gst_message_unref(m);
     gst_object_unref(bus);
     gst_element_set_state(p, GST_STATE_NULL);
     gst_object_unref(p);
     rotate_storage();
+    clips_finalizing--;
   }).detach();
 }
 
@@ -442,7 +566,7 @@ static GstFlowReturn on_h264(GstAppSink *s, gpointer) {
 
 // start (or extend) the event clip; returns its path relative to REC_DIR, or "" if recording is unavailable
 static std::string clip_trigger() {
-  if (!rec_ok()) return "";
+  if (stopping || !rec_ok()) return "";
   std::lock_guard<std::mutex> lk(v_mu);
   if (!h264_caps || ring.empty() || !ring.front().key) return "";
   if (clip.pipe) { clip.until = last_pts + CLIP_POST; return clip.rel; }
@@ -453,7 +577,7 @@ static std::string clip_trigger() {
   GError *err = nullptr;
   GstElement *p = gst_parse_launch(("appsrc name=s is-live=true format=time max-bytes=20000000 ! h264parse ! "
                                     "mp4mux faststart=true ! filesink location=" + REC_DIR + "/" + rel).c_str(), &err);
-  if (!p) { fprintf(stderr, "clip pipeline: %s\n", err ? err->message : "?"); if (err) g_error_free(err); return ""; }
+  if (!p) { LOGE("clip pipeline: %s", err ? err->message : "?"); if (err) g_error_free(err); return ""; }
   clip.pipe = p;
   clip.src = gst_bin_get_by_name(GST_BIN(p), "s");
   gst_object_unref(clip.src);  // the pipeline keeps it alive
@@ -467,7 +591,7 @@ static std::string clip_trigger() {
 }
 
 static std::string save_evidence(guint64 track, GstClockTime after) {
-  if (!rec_ok()) return "";
+  if (stopping || !rec_ok()) return "";
   auto j = jpeg_after(after);
   if (j.empty()) return "";
   std::string day, hms;
@@ -516,7 +640,7 @@ static void log_event(guint64 track, const std::string &name, float score, float
   std::string snap = std::string(day) + "/" + hms + "_" + std::to_string(track) + ".bmp";
   write_bmp(DATA_DIR + "/snaps/" + snap, face_rgb);
   FILE *f = fopen((DATA_DIR + "/events-" + day + ".jsonl").c_str(), "a");
-  if (!f) { fprintf(stderr, "cannot write events in %s\n", DATA_DIR.c_str()); return; }
+  if (!f) { LOGE("cannot write events in %s", DATA_DIR.c_str()); return; }
   // score is always the best cosine; metric and l2 record which rule decided and the matching L2 distance
   fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
              "\"snap\":%s,\"frame\":%s,\"clip\":%s}\n",
@@ -541,23 +665,28 @@ static FILE *json_out = stdout;  // real stdout; fd 1 is pointed at stderr so De
 static const size_t Q_MAX = 32;  // drop jobs if the GPU falls behind instead of growing memory
 static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0};
 
-// Frame watchdog: exit if no frame arrives for FACEPIPE_WATCHDOG seconds (default 60, 0 = off), so systemd restarts us.
-// A thread, not a GLib timer: the stall seen on 2026-11-06 happened while creating nvarguscamerasrc, before the main
-// loop ran, and a stalled process otherwise looks "active" to systemd forever.
+// Watchdog thread, always running. (1) No frame for FACEPIPE_WATCHDOG seconds (default 60, 0 = off): exit 3 so systemd
+// restarts us. A thread, not a GLib timer: the CSI stall of 2026-11-06 happened before the main loop ran, and a stalled
+// process otherwise looks "active" to systemd forever. (2) A shutdown not finished within STOP_LIMIT: exit 4, even with
+// the frame rule off.
 static void start_watchdog() {
   int limit = std::atoi(env("FACEPIPE_WATCHDOG", "60").c_str());
-  if (limit <= 0) return;
   std::thread([limit] {
-    long last = -1;
-    auto since = std::chrono::steady_clock::now();
+    long last = n_frames, since = steady_s();  // counted from start: the first exit is at `limit` s, not 5 s later
     while (true) {
-      std::this_thread::sleep_for(std::chrono::seconds(5));
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+      long now = steady_s();
+      if (stopping) {
+        if (now - stop_at >= STOP_LIMIT) {
+          LOGE("shutdown did not finish within %d s, forcing exit", STOP_LIMIT);
+          _exit(4);
+        }
+        continue;
+      }
       long f = n_frames;
-      auto now = std::chrono::steady_clock::now();
-      if (f != last) { last = f; since = now; continue; }
-      if (std::chrono::duration_cast<std::chrono::seconds>(now - since).count() >= limit) {
-        fprintf(stderr, "[facepipe] watchdog: no frames for %d s, exiting so the service restarts\n", limit);
-        fflush(stderr);
+      if (f != last) { last = f; since = now; }
+      else if (limit > 0 && now - since >= limit) {
+        LOGE("watchdog: no frames for %d s, exiting so the service restarts", limit);
         _exit(3);
       }
     }
@@ -753,8 +882,10 @@ static gboolean report(gpointer) {
   double dt = std::chrono::duration<double>(now - t).count();
   long f = n_frames;
   double fps = (f - last) / dt;
-  fprintf(stderr, "[facepipe] fps %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld\n", fps, f,
-          (long)n_faces, (long)n_known, (long)n_unknown, (long)n_dropped);
+  static int calls = 0;
+  if (calls++ % 12 == 0)  // one log line a minute; status.json every 5 s
+    LOGI("fps %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld", fps, f, (long)n_faces, (long)n_known,
+         (long)n_unknown, (long)n_dropped);
   last = f; t = now;
   // status.json for the web page (written to a temp file, then renamed so readers never see half a file)
   std::string tmp = DATA_DIR + "/status.json.tmp";
@@ -772,7 +903,7 @@ static void on_pad(GstElement *, GstPad *pad, gpointer mux_sink) {
   const char *name = gst_structure_get_name(gst_caps_get_structure(caps, 0));
   if (g_str_has_prefix(name, "video") && !gst_pad_is_linked((GstPad *)mux_sink) &&
       gst_pad_link(pad, (GstPad *)mux_sink) != GST_PAD_LINK_OK)
-    fprintf(stderr, "decoder link failed\n");
+    LOGE("decoder link failed");
   gst_caps_unref(caps);
 }
 
@@ -789,7 +920,7 @@ static guint frame_step() {
   if (!v) {
     const char *n = getenv("FACEPIPE_DROP");
     int i = n ? atoi(n) : 2;
-    if (i < 1) { fprintf(stderr, "FACEPIPE_DROP must be >= 1, got '%s'\n", n); exit(1); }
+    if (i < 1) { LOGE("FACEPIPE_DROP must be >= 1, got '%s'", n); exit(1); }
     v = (guint)i;
   }
   return v;
@@ -823,20 +954,26 @@ static std::string camera_desc(const std::string &uri, int w, int h) {
 }
 
 static gboolean on_bus(GstBus *, GstMessage *m, gpointer loop) {
-  if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_EOS) { fprintf(stderr, "EOS\n"); g_main_loop_quit((GMainLoop *)loop); }
+  if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_EOS) { LOGI("end of stream"); g_main_loop_quit((GMainLoop *)loop); }
   else if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_ERROR) {
     GError *e; gchar *d;
     gst_message_parse_error(m, &e, &d);
-    fprintf(stderr, "ERROR %s: %s\n%s\n", GST_OBJECT_NAME(m->src), e->message, d ? d : "");
+    LOGE("%s: %s (%s)", GST_OBJECT_NAME(m->src), e->message, d ? d : "");
     g_error_free(e); g_free(d);
     g_main_loop_quit((GMainLoop *)loop);
   }
   return TRUE;
 }
 
+static gboolean on_signal(gpointer loop) {
+  begin_stop("signal");
+  g_main_loop_quit((GMainLoop *)loop);
+  return G_SOURCE_CONTINUE;
+}
+
 static GstElement *make(const char *f, const char *n) {
   GstElement *e = gst_element_factory_make(f, n);
-  if (!e) { fprintf(stderr, "cannot create %s\n", f); exit(1); }
+  if (!e) { LOGE("cannot create %s", f); exit(1); }
   return e;
 }
 
@@ -846,7 +983,7 @@ static void start_rtsp() {
   std::string path = env("FACEPIPE_RTSP_AUTH", env("FACEPIPE_DIR", ".") + "/rtsp_auth"), cred;
   std::ifstream f(path);
   if (!std::getline(f, cred) || cred.find(':') == std::string::npos) {
-    fprintf(stderr, "[facepipe] RTSP off: no login in %s\n", path.c_str());
+    LOGW("RTSP off: no login in %s", path.c_str());
     return;
   }
   std::string user = cred.substr(0, cred.find(':')), pass = cred.substr(cred.find(':') + 1);
@@ -869,8 +1006,8 @@ static void start_rtsp() {
   GstRTSPMountPoints *mounts = gst_rtsp_server_get_mount_points(srv);
   gst_rtsp_mount_points_add_factory(mounts, "/live", fac);
   g_object_unref(mounts);
-  if (gst_rtsp_server_attach(srv, nullptr) == 0) fprintf(stderr, "[facepipe] RTSP: cannot listen\n");
-  else fprintf(stderr, "[facepipe] RTSP on rtsp://<this device>:%s/live (login required)\n", env("FACEPIPE_RTSP_PORT", "8554").c_str());
+  if (gst_rtsp_server_attach(srv, nullptr) == 0) LOGE("RTSP: cannot listen");
+  else LOGI("RTSP on rtsp://<this device>:%s/live (login required)", env("FACEPIPE_RTSP_PORT", "8554").c_str());
 }
 
 #ifdef FACEPIPE_ENROLL  // separate binary: it needs OpenCV imgcodecs (imread), which the live binary must not load
@@ -880,19 +1017,19 @@ static int enroll(const std::string &root) {
   det.load(DET_ENGINE.c_str(), nvinfer1::Dims4{1, 3, NET_H, NET_W});
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   DIR *d = opendir(root.c_str());
-  if (!d) { fprintf(stderr, "cannot open %s\n", root.c_str()); return 1; }
+  if (!d) { LOGE("cannot open %s", root.c_str()); return 1; }
   std::vector<std::string> people;
   while (dirent *e = readdir(d)) if (e->d_name[0] != '.' && e->d_type == DT_DIR) people.push_back(e->d_name);
   closedir(d);
   std::string tmp = GALLERY + ".tmp";
   FILE *out = fopen(tmp.c_str(), "w");
-  if (!out) { fprintf(stderr, "cannot write %s\n", tmp.c_str()); return 1; }
+  if (!out) { LOGE("cannot write %s", tmp.c_str()); return 1; }
   int ok = 0, bad = 0;
   std::sort(people.begin(), people.end());
   for (auto &name : people) {
     if (name.find('\t') != std::string::npos || name.find('\n') != std::string::npos) continue;
     DIR *pd = opendir((root + "/" + name).c_str());
-    if (!pd) { fprintf(stderr, "  skip %s: cannot open folder\n", name.c_str()); continue; }
+    if (!pd) { LOGW("skip %s: cannot open folder", name.c_str()); continue; }
     std::vector<std::string> files;
     while (dirent *e = readdir(pd)) {
       std::string f = e->d_name, lo = f;
@@ -905,7 +1042,7 @@ static int enroll(const std::string &root) {
     for (auto &f : files) {
       std::string path = root + "/" + name + "/" + f;
       cv::Mat bgr = cv::imread(path, cv::IMREAD_COLOR), rgb, lb(NET_H, NET_W, CV_8UC3, cv::Scalar(0, 0, 0));
-      if (bgr.empty()) { fprintf(stderr, "  skip %s: unreadable\n", path.c_str()); bad++; continue; }
+      if (bgr.empty()) { LOGW("skip %s: unreadable", path.c_str()); bad++; continue; }
       cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
       float sc = std::min((float)NET_W / rgb.cols, (float)NET_H / rgb.rows);  // letterbox, pad right/bottom like nvinfer
       cv::Mat rs;
@@ -917,21 +1054,21 @@ static int enroll(const std::string &root) {
           for (int c = 0; c < 3; c++) in[c * NET_H * NET_W + y * NET_W + x] = (lb.at<cv::Vec3b>(y, x)[c] - 127.5f) / 128.f;
       det.run();
       auto faces = decode_scrfd([&det](const char *n) { return det.out(n); }, 1.f / sc);
-      if (faces.empty()) { fprintf(stderr, "  skip %s: no face\n", path.c_str()); bad++; continue; }
+      if (faces.empty()) { LOGW("skip %s: no face", path.c_str()); bad++; continue; }
       auto big = std::max_element(faces.begin(), faces.end(), [](const Face &a, const Face &b) {
         return (a.x2 - a.x1) * (a.y2 - a.y1) < (b.x2 - b.x1) * (b.y2 - b.y1); });
       auto e = embed(rec, align(rgb, big->kps));
       fprintf(out, "%s\t", name.c_str());
       for (int i = 0; i < 512; i++) fprintf(out, i ? ",%.6f" : "%.6f", e[i]);
       fprintf(out, "\n");
-      fprintf(stderr, "  %s / %s: face %.0fx%.0f det %.2f%s\n", name.c_str(), f.c_str(), big->x2 - big->x1, big->y2 - big->y1,
+      LOGI("%s / %s: face %.0fx%.0f det %.2f%s", name.c_str(), f.c_str(), big->x2 - big->x1, big->y2 - big->y1,
               big->score, faces.size() > 1 ? " (largest of several)" : "");
       ok++;
     }
   }
   fclose(out);
-  if (rename(tmp.c_str(), GALLERY.c_str()) != 0) { fprintf(stderr, "cannot replace %s\n", GALLERY.c_str()); return 1; }
-  fprintf(stderr, "enrolled %d photos of %zu people into %s (%d skipped)\n", ok, people.size(), GALLERY.c_str(), bad);
+  if (rename(tmp.c_str(), GALLERY.c_str()) != 0) { LOGE("cannot replace %s", GALLERY.c_str()); return 1; }
+  LOGI("enrolled %d photos of %zu people into %s (%d skipped)", ok, people.size(), GALLERY.c_str(), bad);
   return ok ? 0 : 1;
 }
 #endif
@@ -961,6 +1098,28 @@ static int selftest() {
   assert(g.match(q).first == "b");
   assert(Gallery().match(q).first == "unknown");
   METRIC_L2 = m; MATCH = c; L2_MATCH = l;
+  struct tm t = {};  // Friday 6 November 2026, 21:41:07
+  t.tm_year = 126; t.tm_mon = 10; t.tm_mday = 6; t.tm_hour = 21; t.tm_min = 41; t.tm_sec = 7; t.tm_wday = 5;
+  assert(log_stamp(t, 123) == "[06-11-2026] 09:41:07.123 PM, Friday");
+  t.tm_hour = 0;
+  assert(log_stamp(t, 5) == "[06-11-2026] 12:41:07.005 AM, Friday");
+  t.tm_hour = 12;
+  assert(log_stamp(t, 5) == "[06-11-2026] 12:41:07.005 PM, Friday");
+  LOG_ROOT = "/logs";
+  assert(log_path(t) == "/logs/2026/November/facepipe.log");
+  assert(log_backup_name(log_path(t), t) == "/logs/2026/November/facepipe.log.06-Nov-2026");
+  char tmpl[] = "/tmp/facepipe-selftest-XXXXXX";
+  assert(mkdtemp(tmpl));
+  std::string f = std::string(tmpl) + "/a.log";
+  auto put = [&f](const char *txt) { FILE *o = fopen(f.c_str(), "w"); fputs(txt, o); fclose(o); };
+  put("one\n"); log_backup(f, t);
+  put("two\n"); log_backup(f, t);  // a second run on the same day appends to that day's backup
+  std::ifstream bk(log_backup_name(f, t));
+  std::string all((std::istreambuf_iterator<char>(bk)), std::istreambuf_iterator<char>());
+  assert(all == "one\ntwo\n" && access(f.c_str(), F_OK) != 0);
+  unlink(log_backup_name(f, t).c_str());
+  rmdir(tmpl);
+  LOG_ROOT.clear();
   printf("selftest ok\n");
   return 0;
 }
@@ -977,10 +1136,14 @@ int main(int argc, char **argv) {
   L2_MATCH = std::stof(env("FACEPIPE_L2_MATCH", "0.95"));
   std::string metric = env("FACEPIPE_METRIC", "cosine");
   std::transform(metric.begin(), metric.end(), metric.begin(), ::tolower);
-  if (metric != "cosine" && metric != "l2") { fprintf(stderr, "FACEPIPE_METRIC must be cosine or l2, got '%s'\n", metric.c_str()); return 1; }
+  if (metric != "cosine" && metric != "l2") { LOGE("FACEPIPE_METRIC must be cosine or l2, got '%s'", metric.c_str()); return 1; }
   METRIC_L2 = metric == "l2";
   if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest();
   mkdir(DATA_DIR.c_str(), 0755);
+  LOG_ROOT = env("FACEPIPE_LOGS", app_dir + "/logs");
+#ifdef FACEPIPE_ENROLL
+  LOG_MODULE = "enroll";
+#endif
 #ifdef FACEPIPE_ENROLL
   if (argc == 2) return enroll(argv[1]);
   fprintf(stderr, "usage: %s <gallery_dir>\n", argv[0]);
@@ -999,7 +1162,7 @@ int main(int argc, char **argv) {
   std::string uri = argv[1];
   bool camera = uri.rfind("csi:", 0) == 0 || uri.rfind("usb:", 0) == 0;
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
-  fprintf(stderr, "[facepipe] version %s, processing every %u frame(s), match %s %s %.2f, data %s\n", FACEPIPE_VERSION,
+  LOGI("version %s, processing every %u frame(s), match %s %s %.2f, data %s", FACEPIPE_VERSION,
           frame_step(), METRIC_L2 ? "L2" : "cosine", METRIC_L2 ? "<=" : ">=", METRIC_L2 ? L2_MATCH : MATCH, DATA_DIR.c_str());
   start_watchdog();
   gst_init(&argc, &argv);
@@ -1010,10 +1173,10 @@ int main(int argc, char **argv) {
   GstElement *src;
   if (camera) {
     std::string d = camera_desc(uri, mux_w, mux_h);
-    fprintf(stderr, "[facepipe] camera: %s\n", d.c_str());
+    LOGI("camera: %s", d.c_str());
     GError *err = nullptr;
     src = gst_parse_bin_from_description(d.c_str(), TRUE, &err);
-    if (!src) { fprintf(stderr, "camera source: %s\n", err ? err->message : "?"); return 1; }
+    if (!src) { LOGE("camera source: %s", err ? err->message : "?"); return 1; }
   } else {
     src = make("uridecodebin", "src");
     g_object_set(src, "uri", uri.c_str(), nullptr);
@@ -1052,7 +1215,7 @@ int main(int argc, char **argv) {
   g_object_set(sh, "emit-signals", TRUE, "sync", FALSE, "max-buffers", 60, "drop", TRUE, nullptr);
   g_signal_connect(sh, "new-sample", G_CALLBACK(on_h264), nullptr);
   mkdir(LIVE_DIR.c_str(), 0755);
-  fprintf(stderr, "[facepipe] recordings %s: %s\n", REC_DIR.c_str(), rec_ok() ? "on" : "off (not mounted or not writable)");
+  LOGI("recordings %s: %s", REC_DIR.c_str(), rec_ok() ? "on" : "off (not mounted or not writable)");
   g_object_set(mux, "batch-size", 1, "width", mux_w, "height", mux_h, "live-source", live,
                "batched-push-timeout", 40000, nullptr);
   GstCaps *rgba = gst_caps_from_string("video/x-raw(memory:NVMM), format=RGBA");
@@ -1067,7 +1230,7 @@ int main(int argc, char **argv) {
   gst_pad_add_probe(msink, GST_PAD_PROBE_TYPE_BUFFER, drop_probe, nullptr, nullptr);
   if (camera) {
     GstPad *sp = gst_element_get_static_pad(src, "src");
-    if (gst_pad_link(sp, msink) != GST_PAD_LINK_OK) { fprintf(stderr, "camera link failed\n"); return 1; }
+    if (gst_pad_link(sp, msink) != GST_PAD_LINK_OK) { LOGE("camera link failed"); return 1; }
     gst_object_unref(sp);
   } else {
     g_signal_connect(src, "pad-added", G_CALLBACK(on_pad), msink);
@@ -1076,7 +1239,7 @@ int main(int argc, char **argv) {
       !gst_element_link_many(t, qj, cj, fj, jenc, sj, nullptr) ||
       !gst_element_link_many(t, qh, ch, fh, henc, hp, fh2, te, nullptr) ||
       !gst_element_link_many(te, qr, pay, us, nullptr) || !gst_element_link_many(te, qa, sh, nullptr)) {
-    fprintf(stderr, "link failed\n");
+    LOGE("link failed");
     return 1;
   }
   start_rtsp();
@@ -1093,13 +1256,23 @@ int main(int argc, char **argv) {
   gst_object_unref(bus);
   g_timeout_add_seconds(5, report, nullptr);
   gst_element_set_state(pipe, GST_STATE_PLAYING);
+  // systemctl stop (SIGTERM) and Ctrl-C end the main loop, so the camera is released cleanly (an Argus session is
+  // closed, not killed) and the open clip is finalized. Installed only here: a stall before this point (seen with the
+  // CSI camera) still dies on SIGTERM at once instead of waiting for systemd's stop timeout.
+  g_unix_signal_add(SIGTERM, on_signal, loop);
+  g_unix_signal_add(SIGINT, on_signal, loop);
   g_main_loop_run(loop);
+
+  // one shutdown path for signals, end of stream and errors; the watchdog forces an exit after STOP_LIMIT s
+  begin_stop("main loop ended");  // no-op when a signal already began it
   gst_element_set_state(pipe, GST_STATE_NULL);
   report(nullptr);
-
   { std::lock_guard<std::mutex> lk(q_mu); q_stop = true; }
   q_cv.notify_all();
-  worker.join();
+  worker.join();  // queued faces are still matched and logged as attendance; no new clips or evidence (stopping)
+  { std::lock_guard<std::mutex> lk(v_mu); if (clip.pipe) clip_finish(); }
+  while (clips_finalizing > 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  LOGI("stopped");
   gst_object_unref(pipe);
   g_main_loop_unref(loop);
   return 0;  // stream ended or failed; systemd (Restart=always) reconnects a live camera

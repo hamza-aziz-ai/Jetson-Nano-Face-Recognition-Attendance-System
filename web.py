@@ -12,10 +12,11 @@ behind HTTP Basic auth:
 Set the login once (prompts, never stored in plain text):  python3 web.py --set-password <user>
 RTSP login for facepipe's rtsp://<nano>:8554/live (stored 0600, RTSP needs the password itself):
                                                     python3 web.py --set-rtsp-password <user>
-Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000, FACEPIPE_SITE="Face Attendance")
+Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000, FACEPIPE_SITE="Face Attendance",
+                        FACEPIPE_LOGS; log: $FACEPIPE_LOGS/<year>/<Month>/web.log, rotated daily like facepipe.log)
 Self-check:  python3 web.py --selftest
 """
-import base64, csv, datetime, getpass, hashlib, hmac, html, io, json, os, re, socketserver, sys, time
+import base64, csv, datetime, getpass, hashlib, hmac, html, io, json, os, re, socketserver, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -39,6 +40,67 @@ RTSP_AUTH = os.environ.get("FACEPIPE_RTSP_AUTH", os.path.join(HERE, "rtsp_auth")
 RTSP_PORT = os.environ.get("FACEPIPE_RTSP_PORT", "8554")
 CTYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".bmp": "image/bmp", ".mp4": "video/mp4"}
 STALE_S = 20  # status.json older than this: recognition service is not running
+LOG_ROOT = os.environ.get("FACEPIPE_LOGS", os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "logs"))
+MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+          "November", "December"]  # fixed English names, not the locale's
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+# ---------- logs: same layout, rotation and line format as facepipe.cpp ----------
+def log_stamp(t):
+    """[DD-MM-YYYY] hh:mm:ss.fff AM/PM, Weekday (owner's format, 12-hour clock)"""
+    return "[%s] %02d:%02d:%02d.%03d %s, %s" % (t.strftime("%d-%m-%Y"), t.hour % 12 or 12, t.minute, t.second,
+                                                t.microsecond // 1000, "AM" if t.hour < 12 else "PM", WEEKDAYS[t.weekday()])
+
+
+class DailyLog:
+    """<root>/<year>/<Month>/<module>.log; with the first line after midnight it becomes <module>.log.DD-Mon-YYYY in its
+    own month folder (at most 31 a month). Lines also go to stderr (the journal)."""
+
+    def __init__(self, module, root=LOG_ROOT):
+        self.module, self.root, self.f, self.day, self.lock = module, root, None, None, threading.Lock()
+
+    def path(self, d):
+        return os.path.join(self.root, str(d.year), MONTHS[d.month - 1], self.module + ".log")
+
+    @staticmethod
+    def backup(path, d):
+        dst = "%s.%02d-%s-%04d" % (path, d.day, MONTHS[d.month - 1][:3], d.year)
+        if not os.path.exists(dst):
+            os.rename(path, dst)
+            return
+        with open(path, "rb") as src, open(dst, "ab") as out:  # a second run on that day: append
+            out.write(src.read())
+        os.remove(path)
+
+    def _open(self, today):
+        prev = today.replace(day=1) - datetime.timedelta(days=1)
+        for d in (today, prev):  # a file left from an earlier day, in this or the previous month's folder
+            p = self.path(d)
+            if os.path.exists(p):
+                mday = datetime.date.fromtimestamp(os.path.getmtime(p))
+                if mday != today:
+                    self.backup(p, mday)
+        os.makedirs(os.path.dirname(self.path(today)), exist_ok=True)
+        self.f, self.day = open(self.path(today), "a"), today
+
+    def write(self, level, msg, now=None):
+        now = now or datetime.datetime.now()
+        sys.stderr.write("[%s] %s\n" % (level, msg))
+        with self.lock:
+            try:
+                if now.date() != self.day:
+                    if self.f:
+                        self.f.close()
+                        self.backup(self.path(self.day), self.day)
+                    self._open(now.date())
+                self.f.write("%s [%s] %s\n" % (log_stamp(now), level, msg))
+                self.f.flush()
+            except OSError as e:
+                sys.stderr.write("[ERROR] log file: %s\n" % e)
+
+
+LOG = DailyLog("web")
 
 
 # ---------- auth ----------
@@ -138,12 +200,20 @@ def display_name(n):
     return n.replace("_", " ").strip().title()
 
 
+def clock(iso, seconds):
+    """12-hour time of an ISO timestamp, e.g. 09:41 PM or 09:41:07 PM"""
+    if not iso:
+        return ""
+    h, m, s = int(iso[11:13]), iso[14:16], iso[17:19]
+    return "%02d:%s%s %s" % (h % 12 or 12, m, ":" + s if seconds else "", "AM" if h < 12 else "PM")
+
+
 def hm(iso):
-    return iso[11:16] if iso else ""
+    return clock(iso, False)
 
 
 def hms(iso):
-    return iso[11:19] if iso else ""
+    return clock(iso, True)
 
 
 # ---------- pages ----------
@@ -348,7 +418,7 @@ def page(day, today, nonce, host="this-device"):
         n_present=len(people), rate=rate, n_absent=len(absent), n_unknown=len(unknown),
         last_hm=hm(last_any) or "&ndash;", last_s="last face seen" if last_any else "nothing seen",
         present=present_html, absent=absent_html, unknown=unknown_html,
-        version=esc(VERSION), now=datetime.datetime.now().strftime("%H:%M:%S"), refresh=" &middot; refreshes every 30 s" if is_today else "",
+        version=esc(VERSION), now=hms(datetime.datetime.now().isoformat()), refresh=" &middot; refreshes every 30 s" if is_today else "",
         live=LIVE_SECTION if is_today else "",
         rtsp=(" &middot; video stream for VLC/NVR: rtsp://%s:%s/live (separate login)" % (esc(host), RTSP_PORT))
         if os.path.exists(RTSP_AUTH) else "")
@@ -469,6 +539,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self.authorized():
+            if self.headers.get("Authorization"):  # a browser's first request carries none; this one had a wrong login
+                LOG.write("WARNING", "login failed from %s for %s" % (self.client_address[0], self.path[:80]))
             return self.send(401, "Login required", "text/plain; charset=utf-8",
                              {"WWW-Authenticate": 'Basic realm="%s", charset="UTF-8"' % SITE})
         url = urlparse(self.path)
@@ -508,7 +580,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, "Not found", "text/plain; charset=utf-8")
 
     def log_message(self, fmt, *args):
-        pass  # keep the journal quiet; facepipe logs the important parts
+        pass  # no access log (the page polls every few seconds); failed logins and errors are logged
+
+    def log_error(self, fmt, *args):
+        LOG.write("ERROR", "%s: %s" % (self.client_address[0], fmt % args))
 
 
 class Server(socketserver.ThreadingMixIn, HTTPServer):
@@ -522,6 +597,25 @@ def selftest():
     people, unknown = attendance(ev)
     p = people["a_b"]
     assert p["first"].endswith("09:00:00") and p["last"].endswith("17:00:00"), p
+    assert hms("2026-11-06T17:05:09") == "05:05:09 PM" and hm("2026-11-06T00:30:00") == "12:30 AM"
+    assert hm("2026-11-06T12:00:00") == "12:00 PM" and hms("") == ""
+    t = datetime.datetime(2026, 11, 6, 21, 41, 7, 123456)  # a Friday
+    assert log_stamp(t) == "[06-11-2026] 09:41:07.123 PM, Friday", log_stamp(t)
+    import shutil, tempfile
+    root = tempfile.mkdtemp()
+    try:
+        lg = DailyLog("web", root)
+        lg.write("INFO", "day one", t)
+        lg.write("INFO", "next day", t + datetime.timedelta(days=1))  # midnight passed: day one becomes a backup
+        nov = os.path.join(root, "2026", "November")
+        assert open(os.path.join(nov, "web.log.06-Nov-2026")).read().endswith("[INFO] day one\n")
+        assert "07-11-2026" in open(os.path.join(nov, "web.log")).read()
+        lg.write("INFO", "December", datetime.datetime(2026, 12, 1, 0, 0, 1))  # new month folder
+        assert os.path.exists(os.path.join(nov, "web.log.07-Nov-2026"))
+        assert os.path.exists(os.path.join(root, "2026", "December", "web.log"))
+        lg.f.close()
+    finally:
+        shutil.rmtree(root)
     assert p["sightings"] == 2 and p["best"] == 0.7 and p["snap"] == "s1", p
     assert len(unknown) == 1 and display_name("a_b") == "A B"
     assert SNAP_RE.match("2026-11-06/090000_3.jpg") and not SNAP_RE.match("../web_auth")
@@ -550,5 +644,5 @@ if __name__ == "__main__":
             sys.exit("no login set: run  python3 %s --set-password <user>" % sys.argv[0])
         srv = Server(("0.0.0.0", PORT), Handler)
         srv.auth = load_auth()
-        print("attendance page on port %d, data %s" % (PORT, DATA), flush=True)
+        LOG.write("INFO", "web %s: attendance page on port %d, data %s" % (VERSION, PORT, DATA))
         srv.serve_forever()
