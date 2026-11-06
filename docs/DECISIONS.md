@@ -324,3 +324,14 @@ Chosen, agreed with Codex in a council (2 exchanges; messages crossed three time
 Rejected: polkit (Ubuntu 18.04's polkit cannot limit to one unit); a fully public registration page (open biometric upload endpoint); two full processes for two cameras (memory); pausing live for uploads (owner chose beside live).
 Trade-off: Plain HTTP on the LAN still exposes the login and faces to anyone sniffing it.
 Revisit if: the upload capacity test fails, or the device leaves a trusted LAN (then TLS).
+
+## D-034: Registration by invitation, retention, and camera choice (owner)
+Owner's answers of 2026-11-07, refining D-033:
+
+- **Registration:** by invitation link only. The admin creates a single-use link on the People page, valid 48 hours; the person submits a name, 2-5 photos and consent; nothing is enrolled until the admin approves. An open registration page was offered and declined.
+- **Retention of submissions:** a rejected registration's photos are deleted at once; one never reviewed is deleted after 7 days.
+- **Client IP address:** not stored with a registration; only the web log keeps it, like other requests.
+- **Cameras:** the website chooses how the device is integrated: a network camera (RTSP), a USB camera or a CSI camera. Several cameras make sense only for RTSP, because network cameras can sit in different places, while USB and CSI cameras are physically attached to the device. So: one USB or one CSI camera, or a list of RTSP cameras that can each be enabled or disabled, with up to 2 running at once (owner's earlier answer). Order: the camera page with the source choice and the RTSP list first (one RTSP camera active), then two RTSP cameras at once.
+
+Why: owner decisions (exposure, retention, personal data, product scope). RTSP camera addresses contain logins, so they stay in a mode-0600 file on the device and the website never shows the password part.
+Revisit if: a site needs a USB or CSI camera together with a network camera.

@@ -23,6 +23,11 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 5. **Website plan agreed with Codex (D-033):** v1.2 site + service control (built in PR feat/website-v1.2; sudoers rule installed on the owner's Nano with approval), v1.3 registration with safe gallery publication, v1.4 uploads after a capacity test, v1.5 two cameras. First: empty-clip bug and active-face cadence (owner in front of the camera).
 6. **PR practice (D-032):** code via branch + PR with auto-merge on the 5 CI checks; docs straight to main with [skip ci]; releases by the workflow when a merged change raises VERSION. PR #1 merged that way.
 
+## Owner decisions 2026-11-07 (D-034)
+
+- Next work, in this order: registration by invitation (v1.3), then the Cameras page (source choice CSI/USB/RTSP, RTSP list with enable/disable, one active), then two RTSP cameras at once. Video upload after those.
+- Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
+
 ## Next (owner's request of 2026-11-06, in order)
 
 1. End-to-end tests on RTSP, file, USB and CSI (owner in front of the live cameras).
