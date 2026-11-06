@@ -73,6 +73,7 @@ Problems found and solved while building this, each verified on the device:
 - **`nvjpegenc` crash.** On JetPack 4.6 it segfaults on DeepStream `NvBufSurface` buffers; frames are converted to system-memory I420 first.
 - **libjpeg ABI clash.** OpenCV `imgcodecs` and the L4T JPEG library cannot share a process ("JPEG parameter struct mismatch: library thinks size is 584, caller expects 728"), so the live binary avoids `imgcodecs` and enrollment is a separate binary.
 - **Wi-Fi camera at 4-5 fps.** RTSP over UDP lost packets on Wi-Fi; forcing TCP gave a steady 30 fps.
+- **USB webcam at half speed.** UVC cameras trade frame rate for exposure in dim light (a C270 dropped from 30 to 15 fps); the source sets `exposure_auto_priority=0` to keep the rate steady.
 - **Missing development headers.** `gst-rtsp-server` ships only its runtime library on JetPack 4.6, so the few API calls used are declared directly instead of installing extra packages.
 - **Embedded landmarks through the tracker.** The 5 landmarks ride on each object in `misc_obj_info`, so alignment uses the detector's landmarks for the tracked face.
 
@@ -84,7 +85,8 @@ Problems found and solved while building this, each verified on the device:
 | Attendance log, dashboard, CSV, login | Verified |
 | NVJPG live frames, NVENC encoding | Verified (encoders running in the service) |
 | Event clips and full-frame evidence, RTSP playback | Implemented; end-to-end test pending |
-| CSI and USB camera input | Implemented; pipelines build and fail cleanly without a camera, hardware test pending |
+| USB camera input | Verified: Logitech C270, MJPEG 1280x720 decoded on NVJPG, enrolled person recognized |
+| CSI camera input | Implemented; pipeline builds and fails cleanly without a camera, hardware test pending |
 
 ## Getting started
 

@@ -771,9 +771,11 @@ static std::string camera_desc(const std::string &uri, int w, int h) {
            " ! capsfilter caps=\"video/x-raw(memory:NVMM),format=NV12," + caps + "\"";
   std::string dev = uri.substr(4);
   if (env("FACEPIPE_USB_FORMAT", "mjpeg") == "raw")
-    return "v4l2src device=" + dev + " ! video/x-raw,format=YUY2," + caps +
+    return "v4l2src device=" + dev + " extra-controls=\"c,exposure_auto_priority=0\" ! video/x-raw,format=YUY2," + caps +
            " ! nvvideoconvert ! capsfilter caps=\"video/x-raw(memory:NVMM),format=NV12\"";
-  return "v4l2src device=" + dev + " io-mode=2 ! image/jpeg," + caps + " ! jpegparse ! nvv4l2decoder mjpeg=1";
+  // exposure_auto_priority=0: UVC webcams otherwise drop their frame rate in dim light (a C270 fell from 30 to 15 fps)
+  return "v4l2src device=" + dev + " io-mode=2 extra-controls=\"c,exposure_auto_priority=0\" ! image/jpeg," + caps +
+         " ! jpegparse ! nvv4l2decoder mjpeg=1";
 }
 
 static gboolean on_bus(GstBus *, GstMessage *m, gpointer loop) {
