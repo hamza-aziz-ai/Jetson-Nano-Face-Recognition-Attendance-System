@@ -129,3 +129,9 @@ v1.6.0 checks on the Nano (2026-11-07):
 | --- | --- | --- |
 | Device health readings | `device_health()` on the Nano | AO 77, CPU 71, GPU 69, PLL 70, PMIC 50 °C; cores 34/31/17/21 %; CPU 1224 MHz; GPU 0 % at 921 MHz; fan 63 % (no rpm sensor); 1440 of 3963 MB available; swap 406 MB used; level ok |
 | Health API and panel | `python3 web.py --selftest` | ok: 4 panel cards from `/api/health`, 401 without login |
+
+v1.6.1 check on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Event right after start | test instance on a 1280x720 video that starts with a face | before: "event without a clip: the video encoder has not started yet", `"clip": ""`; after: "waiting for the video encoder's first keyframe", clip saved (2.6 MB, 5.4 s) and linked to the event |

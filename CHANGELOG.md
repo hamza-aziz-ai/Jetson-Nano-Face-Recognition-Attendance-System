@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-07
+
+### Fixed
+
+- A person recognized in the first seconds after a (re)start got no clip, only the evidence frame (owner's report: "Where does the clip part have gone, only frame is there?"). The H.264 encoder had not produced its first frame yet, and the event silently went without. Such an event now reserves its clip, which starts at the encoder's first keyframe (without pre-roll); any event that still cannot have a clip logs why.
+
 ## [1.6.0] - 2026-11-07
 
 ### Added
@@ -203,7 +209,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.0...v1.4.1
