@@ -232,3 +232,17 @@ Chosen: 2 (owner request), default cosine
 Why: The CCTV system exposes both (`COSINE_THRESHOLD` 0.5, `L2_THRESHOLD` 0.95); the Nano uses the same model and normalisation, so the same settings carry over. Embeddings are L2-normalised, so L2 = sqrt(2 - 2 cosine): the closest photo is identical under both, and only the threshold rule differs. The defaults are not equivalent: L2 0.95 equals cosine 0.549, slightly stricter than cosine 0.5.
 Trade-off: Two thresholds to tune; events always store the cosine score and also the L2 distance and the metric used, so the dashboard and reports stay comparable.
 Revisit if: a labelled evaluation shows one metric and threshold clearly better.
+
+## D-026: Release assets built on the Nano; no Docker images (owner)
+Options:
+
+1. Docker images on GitHub Packages (ghcr.io)
+2. Release assets: binaries and files the Nano installs, with checksums
+3. Both
+
+Chosen: 2 (owner)
+Why: The project runs natively on the Nano (no Docker on the device), and a CI machine could not run a JetPack 4 image's GPU code anyway (JetPack 4 containers mount CUDA and TensorRT from the host). The binaries must link against the device's JetPack libraries, so they are built and tested on a Nano by the self-hosted runner (owner choice for CD) and attached to the release with `SHA256SUMS`.
+Trade-off: Assets exist only for releases deployed while the runner is registered; without it, `deploy/deploy.sh` is run by hand and the release has no assets.
+Revisit if: Docker is used on a Jetson, or a central host runs the pipeline.
+
+Runner security (owner: block pull requests from anyone else): the Deploy workflow triggers only on published releases and manual dispatch, never on pull requests; it uses the `production` environment; workflows from outside contributors need the maintainer's approval (repository setting); the job is skipped unless the repository variable `NANO_RUNNER` is `true`.

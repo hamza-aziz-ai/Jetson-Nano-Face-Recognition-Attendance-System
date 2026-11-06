@@ -2,6 +2,10 @@
 
 Last good commit: see `git log`; every commit on `main` has been deployed and run on the device. Rebuild after any code rollback with `make all` on the Nano and restart the services.
 
+## Automatic
+
+`deploy/deploy.sh` keeps the previous files in `<app_dir>/.prev/` and restores them, then restarts the services, if the new version is not running and reporting itself in `status.json` within 60 s.
+
 ## Code
 
 1. `git revert <commit>` (or `git checkout <commit> -- <file>`), push.

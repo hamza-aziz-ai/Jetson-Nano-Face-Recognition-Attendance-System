@@ -16,7 +16,11 @@ Docs-only and CI-only changes go into `[Unreleased]` and ship with the next rele
 2. To release: rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD`, add a fresh empty `[Unreleased]`, update the compare links at the bottom, set `VERSION` to `X.Y.Z`. Commit as `Release vX.Y.Z`.
 3. Tag and push: `git tag -a vX.Y.Z -m "facepipe vX.Y.Z" && git push origin vX.Y.Z`.
 4. The Release workflow reruns the full CI on the tag, checks that the tag matches `VERSION` and that `CHANGELOG.md` has the section, and publishes the GitHub Release with that section as notes.
-5. Deploy the tag to the Nano (manual today; the self-hosted runner later) and confirm `facepipe --version` and the dashboard footer show the new version.
+5. The Deploy to Nano workflow (self-hosted runner on the Nano, enabled by the repository variable `NANO_RUNNER=true`) builds the tag on the device, runs `facepipe --selftest` and the web self-test, checks the version, uploads the release assets (`facepipe-X.Y.Z-jetson-nano-jetpack4.6-arm64.tar.gz` and `SHA256SUMS`), installs and restarts the services, and rolls back if `status.json` does not report the new version within 60 s. Without the runner, run `sh deploy/deploy.sh vX.Y.Z` on the Nano by hand; it does the same except the upload.
+
+## Release assets
+
+Each release carries what a Nano installs, built and tested on a Nano: both binaries, `web.py`, `VERSION`, `pgie_scrfd.txt`, `facepipe.env.example`, `check_vs_rest.py`, the deploy scripts, README and CHANGELOG, plus `SHA256SUMS`. Models, engines, logins, data and the gallery are never included. Verify with `sha256sum -c SHA256SUMS`. There are no Docker images: the project runs natively on the Nano (D-026).
 
 ## Rollback
 

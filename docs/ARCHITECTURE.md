@@ -50,7 +50,8 @@ flowchart LR
   OK -->|"`no`"| FIX["`Fix and push again`"]:::error
   OK -->|"`yes`"| MAIN["`main`"]:::outcome
   MAIN --> TAG["`Tag vX.Y.Z: release workflow reruns CI, publishes GitHub Release`"]:::step
-  TAG --> MANUAL["`Copy to the Nano, make all, restart services`"]:::step
+  TAG --> MANUAL["`On the Nano: sh deploy/deploy.sh vX.Y.Z (build, test, install, roll back if unhealthy)`"]:::step
+  TAG -. "`switched off until NANO_RUNNER is set`" .-> RUNNER["`Deploy to Nano workflow on the self-hosted runner: same script, then upload release assets`"]:::step
   classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
   classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
   classDef decision fill:#fef3c7,stroke:#b45309,color:#78350f
@@ -58,7 +59,7 @@ flowchart LR
   classDef error fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
 ```
 
-Deploys are manual today (copy, `make all`, restart); the release workflow and versioning are in docs/RELEASING.md. Planned work is not drawn here; it is listed in HANDOVER.md.
+Today `deploy/deploy.sh` is run on the Nano by hand. The Deploy to Nano workflow is on main but switched off until a runner is registered and `NANO_RUNNER` is set; dotted means switched off. Versioning and release assets: docs/RELEASING.md.
 
 ## Hardware blocks used
 

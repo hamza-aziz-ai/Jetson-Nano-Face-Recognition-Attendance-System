@@ -10,7 +10,8 @@ The system holds biometric data (face photos, embeddings, snapshots, clips) of r
 | Someone who can enroll | Gallery folder names | Script injection on the page | Names are HTML-escaped; tabs and newlines in names are skipped | Filesystem access to the device is already full control |
 | Lookalike or photo of a person | Camera | False attendance | Match threshold 0.5 | No liveness check; threshold not tuned |
 | Physical access | microSD card | Copy all faces and data | None | No disk encryption |
-| Code contributor | Public repository | Ship malicious code | Owner deploys by hand | No CI checks yet |
+| Code contributor | Public repository | Ship malicious code | CI on every pull request; workflows from outside contributors need the maintainer's approval; the self-hosted runner only runs the Deploy workflow for published releases and manual dispatch, in the `production` environment | A pull request could edit a workflow to target the runner; the approval setting is the control, so never approve unreviewed workflow changes |
+| Self-hosted runner | The Nano | Runs released code with the runner user's rights | Dedicated user with sudo only for restarting the two services | Not yet registered |
 | The repository itself | GitHub | Leak secrets or faces | `.gitignore`; every push is scanned for IPs and secrets | Relies on the scan being run |
 
 Data subject rights: to remove a person, delete their gallery folder, re-run enrollment, and delete their lines and snapshots from `data/` (see DATA.md).

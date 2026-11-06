@@ -74,7 +74,7 @@ flowchart TB
   GREEN -->|"`yes`"| MAIN["`(4) main`"]:::outcome
   MAIN --> TAG["`(5) **Tag vX.Y.Z** matching VERSION and CHANGELOG`"]:::step
   TAG --> REL["`(6) **Release workflow**: full CI again, tag check, GitHub Release`"]:::step
-  REL --> DEPLOY["`(7) **Deploy**: copy to the Nano, make all, restart services`"]:::step
+  REL --> DEPLOY["`(7) **Deploy** on the Nano: build, self-test, install, roll back if unhealthy`"]:::step
   DEPLOY --> NANO["`(8) **Jetson Nano**: facepipe and facepipe-web under systemd`"]:::outcome
   MODELS[("`(9) Models: TensorRT engines built on the device`")]:::store --> NANO
   NANO --> DATA[("`(10) microSD: data, gallery, recordings volume`")]:::store
@@ -93,7 +93,7 @@ flowchart TB
 4. **Main.** Only green commits are released.
 5. **Version.** The `VERSION` file follows Semantic Versioning and is compiled into the binaries, `status.json` and the dashboard footer (D-023).
 6. **Release.** Pushing a `vX.Y.Z` tag reruns the full CI, checks that the tag matches `VERSION` and has a changelog section, and publishes the GitHub Release with those notes.
-7. **Deploy.** The release is copied to the Nano and built there with `make all`, which links against the JetPack libraries on the device; then the two systemd services restart.
+7. **Deploy.** `deploy/deploy.sh` builds the tag on the Nano with `make all` (linking against the JetPack libraries on the device), runs the self-tests, installs over the app folder while keeping configuration, data and models, restarts the services and rolls back if the new version is not healthy within 60 s. A Deploy to Nano workflow runs the same script on a self-hosted runner and uploads the release assets; it stays switched off until a runner is registered (D-026).
 8. **On the device.** `facepipe` (pipeline) and `facepipe-web` (dashboard) run under systemd, restart on failure and reconnect to the camera.
 9. **Models.** TensorRT engines are built on the Nano itself with `trtexec`, because an engine is tied to the GPU and TensorRT version it was built on.
 10. **Storage.** Code, models, data and the gallery live on the microSD; clips and evidence go to a size-capped 64 GB volume.

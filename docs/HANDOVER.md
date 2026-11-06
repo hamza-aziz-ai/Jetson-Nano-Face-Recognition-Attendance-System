@@ -2,6 +2,11 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## Update: 2026-11-06 late night (model: Claude Opus 5.5)
+
+Done: matching metric toggle (D-025); release assets and Deploy to Nano workflow with automatic rollback (D-026), switched off until the runner exists; README System Design and Solution Architecture (D-024).
+Next (needs the Nano powered on and the owner): run `./facepipe --selftest` on the device; register the self-hosted runner (the owner runs `config.sh` with the registration token), create its restricted user and sudo rule (exact commands to be approved), set `NANO_RUNNER=true`; deploy the next release through it.
+
 ## Update: 2026-11-06 night (model: Claude Opus 5.5)
 
 Done: Mermaid diagrams (ARCHITECTURE A1-A2, FLOW 1-4) rendered in CI, PR template (D-022). Versioning and releases: VERSION 0.9.0, CHANGELOG, Release workflow, docs/RELEASING.md (D-023). First release v0.9.0.

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Release assets and automated deploy: on each published release, the self-hosted runner on the Nano builds the tag, runs the self-tests, uploads `facepipe-X.Y.Z-jetson-nano-jetpack4.6-arm64.tar.gz` and `SHA256SUMS` to the release, installs it and rolls back automatically if the new version is not healthy within 60 s (`deploy/deploy.sh`, `.github/workflows/deploy.yml`). Off until the repository variable `NANO_RUNNER` is set.
+
 - Face matching metric toggle: `FACEPIPE_METRIC=cosine` (default, `FACEPIPE_MATCH` 0.5) or `l2` (`FACEPIPE_L2_MATCH` 0.95), the same settings as the CCTV system. Events record the metric and the L2 distance. `facepipe --selftest` checks the match rule.
 
 ### Changed

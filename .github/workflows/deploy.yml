@@ -1,0 +1,42 @@
+name: Deploy to Nano
+
+# Runs on the self-hosted runner on the Jetson Nano. Only published releases (made from tags the owner pushes)
+# or a manual dispatch start it; pull requests never do. Off until the repository variable NANO_RUNNER is "true".
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build, test and deploy (vX.Y.Z)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nano-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build on the Nano, upload release assets, deploy
+    if: vars.NANO_RUNNER == 'true'
+    runs-on: [self-hosted, nano]
+    environment: production
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      # plain shell: GitHub's JavaScript actions need a newer glibc than Ubuntu 18.04 has
+      - name: Fetch the deploy scripts of this tag
+        run: |
+          rm -rf deploy-src
+          git clone -q --depth 1 --branch "$TAG" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" deploy-src
+      - name: Build, test, package, install, health check (rolls back on failure)
+        run: DIST="$PWD/dist" sh deploy-src/deploy/deploy.sh "$TAG"
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 deploy-src/deploy/upload-assets.py "$TAG" dist
