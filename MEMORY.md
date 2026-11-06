@@ -28,6 +28,12 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 - Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (v1.4, built in PR feat/cameras), then two RTSP cameras at once, then video upload, then a full enterprise-style redesign of the website (owner, 2026-11-07: after all features).
 - Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
 
+## Redesign backlog (owner, 2026-11-07: "fix these theme and UI issues when we start working on the enterprise look")
+
+- Registration page: the form uses half the card width; the file input is the browser's plain "Choose Files"; the consent checkbox and text look unaligned; no photo previews before sending.
+- People page: cards were cramped (fixed in v1.4.1); generally tighten spacing, typography and button styles across pages.
+- Footer says "no data leaves this device": must change if remote access through Cloudflare is added.
+
 ## Open question to the owner (2026-11-07)
 
 - Remote access over the internet through a Cloudflare Tunnel (home use). Proposed: Cloudflare Access in front (email code or Google login), `/register` bypass or registration only at home, the site to take the visitor address from `CF-Connecting-IP` only for tunnel requests (otherwise one person's failed logins lock everyone out), README/THREAT to say faces pass through Cloudflare when viewed remotely. Needs: the owner's domain on Cloudflare, the owner runs `cloudflared tunnel login`, approval of the cloudflared service.
