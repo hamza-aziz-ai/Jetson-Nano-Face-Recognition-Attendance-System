@@ -90,3 +90,11 @@ v1.2.1 check (2026-11-07):
 | --- | --- | --- |
 | Browser-like POST | `python3 web.py --selftest` on the Nano | `Referrer-Policy: same-origin` sent; `Origin: null` refused like other foreign origins; same-origin post with the token passes the guard |
 | Buttons, dialog, pause in a browser | owner, after the update deploys | to be confirmed by the owner (v1.2.0 failed this in the owner's browser) |
+
+v1.2.2 checks on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Self-test keeps the real log clean | line count of `logs/2026/November/web.log` around `python3 web.py --selftest` | selftest ok; 0 lines added |
+| Profile picture | `first_photo("hamza_aziz")` with the real gallery | `gallery/hamza_aziz/profile.jpg` |
+| Stop and Start from the website (v1.2.1) | owner's browser | Stop: facepipe `inactive (dead)`, clean stop in 0.18 s, wanted state `stopped`; Start: active again, 14.8 fps |

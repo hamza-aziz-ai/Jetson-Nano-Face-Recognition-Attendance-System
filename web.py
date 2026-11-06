@@ -437,14 +437,15 @@ def page_system(csrf, flash):
 <dt>Detections per second</dt><dd>%s</dd><dt>Frames processed</dt><dd>%s</dd><dt>Camera</dt><dd>%s</dd></dl>
 <div class="actions">%s</div></section>
 <section aria-labelledby="h-dev"><div class="sh"><h2 id="h-dev">Device</h2></div>
-<dl class="kv"><dt>Software</dt><dd>facepipe %s (web %s)</dd><dt>Recordings volume</dt><dd>%s</dd><dt>App storage</dt><dd>%s</dd>
+<dl class="kv"><dt>Software</dt><dd>facepipe %s (web %s)</dd><dt>microSD card</dt><dd>%s <span class="muted">(system, app, data and logs)</span></dd>
+<dt>Recordings</dt><dd>%s <span class="muted">(clips and evidence; a volume on the microSD card)</span></dd>
 <dt>Last update check</dt><dd>%s</dd></dl></section>
 <section aria-labelledby="h-log" class="noprint"><div class="sh"><h2 id="h-log">Recent log</h2><span class="count">facepipe.log</span></div>
 <pre class="log">%s</pre></section>""" % (
         st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
         "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
-        st.get("frames", "&ndash;"), esc(camera_label()), buttons, esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(REC_DIR)),
-        esc(disk(HERE)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
+        st.get("frames", "&ndash;"), esc(camera_label()), buttons, esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
+        esc(disk(REC_DIR)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
     return layout("system", "System", body, flash=flash)
 
 
@@ -516,7 +517,8 @@ def first_photo(name):
         files = sorted(f for f in os.listdir(folder) if f.lower().endswith((".jpg", ".jpeg", ".png")))
     except OSError:
         return None
-    return os.path.join(folder, files[0]) if files else None
+    profile = [f for f in files if os.path.splitext(f)[0].lower() == "profile"]  # the person's chosen picture, if any
+    return os.path.join(folder, (profile or files)[0]) if files else None
 
 
 # ---------- server ----------
@@ -767,6 +769,16 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
 
 
 def selftest():
+    import shutil, tempfile
+    log_root, LOG.root = LOG.root, tempfile.mkdtemp()  # expected refusals and failed logins stay out of the real web.log
+    try:
+        selftest_checks()
+    finally:
+        shutil.rmtree(LOG.root, ignore_errors=True)
+        LOG.root = log_root
+
+
+def selftest_checks():
     ev = [{"time": "2026-11-06T09:00:00", "ts": 1, "name": "a_b", "score": 0.6, "snap": "s1"},
           {"time": "2026-11-06T09:05:00", "ts": 2, "name": "unknown", "score": 0.2, "snap": "s2"},
           {"time": "2026-11-06T17:00:00", "ts": 3, "name": "a_b", "score": 0.7, "snap": "s3"}]

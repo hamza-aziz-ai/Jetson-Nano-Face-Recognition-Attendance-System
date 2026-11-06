@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-07
+
+### Changed
+
+- System page: storage is labelled by where it lives: "microSD card" (system, app, data and logs) and "Recordings" (a volume on the microSD card), instead of "App storage" and "Recordings volume" (owner's question).
+- A person's picture on the website is `gallery/<name>/profile.jpg` (or `.png`) when present, otherwise their first photo.
+
+### Fixed
+
+- `web.py --selftest` (run by every deploy) wrote its expected refusals and failed logins into the device's real `web.log`; it now logs to a temporary folder.
+
 ## [1.2.1] - 2026-11-07
 
 ### Fixed
@@ -148,7 +159,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.1...v1.1.2
