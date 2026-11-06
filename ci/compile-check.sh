@@ -8,7 +8,7 @@ apt-get install -y -qq --no-install-recommends g++ make pkg-config curl ca-certi
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libopencv-dev cppcheck >/dev/null
 g++ --version | head -1
 [ -d .jp/ds ] || sh ci/jetpack-headers.sh .jp
-make check DS=.jp/ds CUDA=.jp/cuda EXTRA_INC=-I.jp/trt OPENCV_PC= OPENCV_PKG=opencv
+make check DS=.jp/ds CUDA=.jp/cuda INC=-isystem EXTRA_INC="-isystem .jp/trt" OPENCV_PC= OPENCV_PKG=opencv
 echo "compile ok: facepipe and facepipe-enroll"
 cppcheck --error-exitcode=1 --enable=warning --inline-suppr -q --std=c++14 facepipe.cpp
 echo "cppcheck ok"

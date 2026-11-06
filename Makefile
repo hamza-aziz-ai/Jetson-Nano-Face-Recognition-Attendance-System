@@ -5,8 +5,10 @@ OPENCV_PKG ?= opencv4
 OCV = /opt/opencv-4.9.0-cuda/lib
 # extra include dirs, e.g. TensorRT headers outside the default path (used by CI)
 EXTRA_INC ?=
+# CI uses -isystem so warnings inside NVIDIA headers do not fail -Werror (they are system headers on the device)
+INC ?= -I
 
-CXXFLAGS = -O2 -std=c++14 -Wall -I$(DS)/sources/includes -I$(CUDA)/include $(EXTRA_INC) \
+CXXFLAGS = -O2 -std=c++14 -Wall $(INC) $(DS)/sources/includes $(INC) $(CUDA)/include $(EXTRA_INC) \
   $(shell pkg-config --cflags gstreamer-1.0 gstreamer-app-1.0) $(shell PKG_CONFIG_PATH=$(OPENCV_PC) pkg-config --cflags $(OPENCV_PKG))
 # gst-rtsp-server: runtime library only (no -dev package), linked by path; prototypes are in facepipe.cpp
 LDLIBS = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0) /usr/lib/aarch64-linux-gnu/libgstrtspserver-1.0.so.0 \
