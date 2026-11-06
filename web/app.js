@@ -12,6 +12,36 @@
   }
   if (page !== "register") setInterval(poll, 10000);  // the public page has no device status
 
+  // small screens: the sidebar opens as a menu
+  var mb = document.getElementById("menubtn"), side = document.getElementById("side");
+  if (mb) mb.addEventListener("click", function () {
+    var open = side.classList.toggle("open");
+    mb.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
+  // registration: drop zone and previews of the chosen photos
+  var drop = document.getElementById("drop"), pv = document.getElementById("previews");
+  if (drop) {
+    var fin = drop.querySelector("input[type=file]");
+    var show = function () {
+      pv.textContent = "";
+      Array.prototype.slice.call(fin.files, 0, 5).forEach(function (f) {
+        var im = document.createElement("img");
+        im.alt = f.name; im.src = URL.createObjectURL(f);
+        im.onload = function () { URL.revokeObjectURL(im.src); };
+        pv.appendChild(im);
+      });
+    };
+    fin.addEventListener("change", show);
+    ["dragenter", "dragover"].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("over"); });
+    });
+    ["dragleave", "drop"].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("over"); });
+    });
+    drop.addEventListener("drop", function (e) { fin.files = e.dataTransfer.files; show(); });
+  }
+
   // sortable tables
   document.querySelectorAll("table[data-sort]").forEach(function (t) {
     t.querySelectorAll("th[data-k]").forEach(function (th) {

@@ -8,20 +8,25 @@
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v=$version">
 </head>
-<body data-page="$page" data-refresh="$refresh">
+<body data-page="$page" data-refresh="$refresh" class="app">
 <a class="skip" href="#main">Skip to content</a>
-<header class="top">
- <div class="bar">
-  <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="28" height="28"><span>$site</span></a>
-  <nav class="menu" aria-label="Main">$nav</nav>
+<aside class="side" id="side" aria-label="Main navigation">
+ <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="32" height="32"><span><b>$site</b><small>Jetson Nano edge AI</small></span></a>
+ <nav class="nav">$nav</nav>
+ <div class="side-foot"><span class="dot $state"></span><span>$detail</span></div>
+</aside>
+<div class="shell">
+ <header class="topbar">
+  <button class="menu-btn" id="menubtn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <span class="crumb">$site <span aria-hidden="true">/</span> <b>$title</b></span>
   <span id="status" class="pill $state" role="status" aria-live="polite">$detail</span>
- </div>
-</header>
-<main id="main">
+ </header>
+ <main id="main">
 $flash
 $body
-</main>
-<footer>facepipe v$version &middot; Jetson Nano &middot; on-device recognition, no data leaves this device &middot; page generated $now</footer>
+ </main>
+ <footer>facepipe v$version &middot; recognition runs on this device &middot; page generated $now</footer>
+</div>
 <dialog id="confirm" class="dlg" aria-labelledby="dlg-title" aria-describedby="dlg-text">
  <h2 id="dlg-title">Please confirm</h2><p id="dlg-text"></p>
  <div class="dlg-actions"><button class="btn" type="button" id="dlg-cancel">Cancel</button><button class="btn primary" type="button" id="dlg-ok">Confirm</button></div>

@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-07
+
+### Changed
+
+- Website redesign (owner: "a professional look like an enterprise solution yet user friendly and easy to navigate"): a sidebar with icons for the six pages and the live status, a header with the page name and status, refined cards, tables, buttons and forms, and a menu button on small screens.
+- Registration page: its own layout, centred, with a drop zone for photos, previews of the chosen photos and a clearer consent box; the form uses the full card width.
+- The footer no longer claims that no data leaves the device; it says recognition runs on the device.
+
 ## [1.4.1] - 2026-11-07
 
 ### Fixed
@@ -188,7 +196,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.2...v1.3.0

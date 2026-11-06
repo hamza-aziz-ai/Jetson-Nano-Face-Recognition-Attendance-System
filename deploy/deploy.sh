@@ -14,7 +14,7 @@ VER=${TAG#v}
 WORK=$(mktemp -d)
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
-FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh web/layout.html web/app.css web/app.js web/logo.svg"
+FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh web/layout.html web/public.html web/app.css web/app.js web/logo.svg"
 
 echo "== build $TAG"
 git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
