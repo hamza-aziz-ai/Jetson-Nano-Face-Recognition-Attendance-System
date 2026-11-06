@@ -37,12 +37,14 @@ tar -C "$WORK/pkg" -czf "$DIST/$NAME" "facepipe-$VER"
 echo "== install into $APP"
 mkdir -p "$APP/.prev"
 for f in $FILES; do if [ -e "$APP/$f" ]; then cp -p "$APP/$f" "$APP/.prev/$f"; fi; done
-for f in $FILES; do cp -p "$f" "$APP/$f"; done
+# copy next to the target, then rename: cp onto a running binary fails with "Text file busy"
+install_file() { cp -p "$1" "$2.new" && mv -f "$2.new" "$2"; }
+for f in $FILES; do install_file "$f" "$APP/$f"; done
 if [ ! -e "$APP/tracker.yml" ]; then cp tracker.yml "$APP/"; fi
 
 rollback() {
   echo "== ROLLBACK: restoring the previous version"
-  for f in $FILES; do if [ -e "$APP/.prev/$f" ]; then cp -p "$APP/.prev/$f" "$APP/$f"; fi; done
+  for f in $FILES; do if [ -e "$APP/.prev/$f" ]; then install_file "$APP/.prev/$f" "$APP/$f"; fi; done
   sudo -n systemctl restart facepipe facepipe-web
   exit 1
 }
