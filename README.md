@@ -58,7 +58,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 📋 **Attendance** | Per-day event log with first and last seen, sightings, match score and a face snapshot; CSV export |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
-| 🖥️ **Dashboard** | Present, absent and unknown per day, live health, search and sort, print layout, 12-hour times; Python standard library only, works offline |
+| 🖥️ **Website** | Overview, Live, Attendance, People and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
 | ⚙️ **Operations** | Frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |
 
@@ -268,10 +268,11 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | Adaptive detection | ✅ Same boxes and embeddings as before on identical frames (cosine 1.0000); 15 fps empty and occupied |
 | Clean shutdown, watchdog, daily logs | ✅ Verified |
 | Automatic update with health check | ✅ v1.1.1 deployed itself, healthy after 22 s |
+| Website and service control | ✅ 5 pages with real data; Restart from the System page restarted the service cleanly |
 
 ## Roadmap
 
-Planned and agreed in a design review (D-033): **v1.2** multi-page website with live view and service control · **v1.3** self-registration by invitation with admin approval · **v1.4** video upload with annotated output, queued beside live · **v1.5** two cameras with enable and disable.
+Agreed in a design review (D-033): **v1.2** multi-page website with live view and service control (done) · **v1.3** self-registration by invitation with admin approval · **v1.4** video upload with annotated output, queued beside live · **v1.5** two cameras with enable and disable.
 
 ## Engineering notes
 
@@ -312,7 +313,7 @@ Every bug has a write-up in [docs/bugs/](docs/bugs/).
 | Path | Purpose |
 | --- | --- |
 | `facepipe.cpp` | DeepStream pipeline, detection probe and SCRFD decoding, alignment, recognition worker, video outputs, RTSP server, logging, enrollment (`-DFACEPIPE_ENROLL`) |
-| `web.py` | Dashboard, CSV export, live MJPEG view, evidence files, login management |
+| `web.py`, `web/` | Website (5 pages, service control), CSV export, live MJPEG view, evidence files, login management |
 | `facepipe.env.example` | All runtime settings |
 | `deploy/install.sh` | One-step install: build, engines, self-tests, `facepipe.env`, services and update timer for the current user and folder |
 | `deploy/deploy.sh`, `deploy/update.sh` | Release deploy with health check and rollback; the automatic update check |

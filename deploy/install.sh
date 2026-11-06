@@ -53,6 +53,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable facepipe.service facepipe-web.service
 # automatic updates (D-031): deploy.sh needs `sudo -n systemctl stop|start facepipe facepipe-web` without a password
 sudo systemctl enable --now facepipe-update.timer
+# the website's Start/Stop/Restart (D-033): exactly these three commands for facepipe, never for the web itself
+RULE="$USER_NAME ALL=(root) NOPASSWD: /bin/systemctl start facepipe, /bin/systemctl stop facepipe, /bin/systemctl restart facepipe"
+echo "$RULE" > /tmp/facepipe-web.sudoers
+if sudo visudo -cf /tmp/facepipe-web.sudoers >/dev/null; then
+  sudo install -m 0440 -o root -g root /tmp/facepipe-web.sudoers /etc/sudoers.d/facepipe-web
+else
+  echo "sudoers rule rejected by visudo; service control on the website will not work"
+fi
+rm -f /tmp/facepipe-web.sudoers
 [ -f web_auth ] || echo "set the dashboard login first: python3 web.py --set-password <user>"
 sudo systemctl restart facepipe facepipe-web
 echo "done: dashboard on http://<this-device>:$(grep -E '^FACEPIPE_WEB_PORT=' facepipe.env | cut -d= -f2 || echo 8000)"

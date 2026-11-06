@@ -14,7 +14,7 @@ VER=${TAG#v}
 WORK=$(mktemp -d)
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
-FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh"
+FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh web/layout.html web/app.css web/app.js web/logo.svg"
 
 echo "== build $TAG"
 git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
@@ -36,15 +36,20 @@ tar -C "$WORK/pkg" -czf "$DIST/$NAME" "facepipe-$VER"
 (cd "$DIST" && sha256sum "$NAME" > SHA256SUMS && cat SHA256SUMS)
 
 echo "== install into $APP"
-mkdir -p "$APP/.prev/deploy" "$APP/deploy"
+mkdir -p "$APP/.prev/deploy" "$APP/deploy" "$APP/.prev/web" "$APP/web"
 for f in $FILES; do if [ -e "$APP/$f" ]; then cp -p "$APP/$f" "$APP/.prev/$f"; fi; done
 # copy next to the target, then rename: cp onto a running binary fails with "Text file busy"
 install_file() { cp -p "$1" "$2.new" && mv -f "$2.new" "$2"; }
 for f in $FILES; do install_file "$f" "$APP/$f"; done
 if [ ! -e "$APP/tracker.yml" ]; then cp tracker.yml "$APP/"; fi
 
-# stop, give the Argus camera daemon a moment to release a CSI camera, then start (an immediate restart once stalled)
-restart_services() { sudo -n systemctl stop facepipe facepipe-web && sleep 3 && sudo -n systemctl start facepipe facepipe-web; }
+# stop, give the Argus camera daemon a moment to release a CSI camera, then start. A recognition service stopped on the
+# website stays stopped (data/desired, D-033): only the web is started then.
+wanted_stopped() { [ "$(cat "$APP/data/desired" 2>/dev/null)" = "stopped" ]; }
+restart_services() {
+  sudo -n systemctl stop facepipe facepipe-web && sleep 3 || return 1
+  if wanted_stopped; then sudo -n systemctl start facepipe-web; else sudo -n systemctl start facepipe facepipe-web; fi
+}
 
 rollback() {
   echo "== ROLLBACK: restoring the previous version"
@@ -64,6 +69,10 @@ restart_services || rollback
 i=0; pid=""; seen=0; last_u=""; last_f=""
 while [ $i -lt $WINDOW ]; do
   sleep 2; i=$((i + 2))
+  if wanted_stopped; then  # healthy = the web runs the new version; recognition stays off as wanted
+    systemctl is-active -q facepipe-web && ! systemctl is-active -q facepipe && { echo "healthy: web $VER, recognition stopped as wanted"; echo "$DIST"; exit 0; }
+    continue
+  fi
   systemctl is-active -q facepipe && systemctl is-active -q facepipe-web || continue
   p=$(systemctl show -p MainPID --value facepipe)
   # a new process (first start or a restart by the watchdog): only its own reports count
