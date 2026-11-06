@@ -20,7 +20,7 @@ Snapshot: **2026-11-06 23:35 IST**. Volatile state; verify before acting (see "S
 3. **v1.1.0: adaptive detection (D-028), this commit.** Own SCRFD probe replacing nvinfer; same results as nvinfer on identical frames; empty scene 15 fps, 2.4 detections/s, GPU about 0%. Still to measure with a face present (owner): fps and delivery gaps during recognition.
 
 4. **v1.1.1: automatic deployment (D-031)**, owner chose a pull timer over the GitHub runner: `facepipe-update.timer` every 10 min runs `deploy/update.sh`. Units must be installed on the owner's Nano with approval of the exact files.
-5. **Website plan agreed with Codex (D-033):** v1.2 site + service control (needs the owner's sudoers approval), v1.3 registration with safe gallery publication, v1.4 uploads after a capacity test, v1.5 two cameras. First: empty-clip bug and active-face cadence (owner in front of the camera).
+5. **Website plan agreed with Codex (D-033):** v1.2 site + service control (built in PR feat/website-v1.2; sudoers rule installed on the owner's Nano with approval), v1.3 registration with safe gallery publication, v1.4 uploads after a capacity test, v1.5 two cameras. First: empty-clip bug and active-face cadence (owner in front of the camera).
 6. **PR practice (D-032):** code via branch + PR with auto-merge on the 5 CI checks; docs straight to main with [skip ci]; releases by the workflow when a merged change raises VERSION. PR #1 merged that way.
 
 ## Next (owner's request of 2026-11-06, in order)

@@ -4,7 +4,10 @@ The system holds biometric data (face photos, embeddings, snapshots, clips) of r
 
 | Actor | Entry point | Worst realistic abuse | In place | Gap |
 | --- | --- | --- | --- | --- |
-| Someone on the LAN | Web page, port 8000 | View faces and attendance | Login (PBKDF2 hash), CSP with nonces, X-Frame-Options, nosniff | Plain HTTP: the password and pages travel in clear; no lockout after failed logins |
+| Someone on the LAN | Web page, port 8000 | View faces and attendance | Login (PBKDF2 hash), CSP `script-src 'self'` with no inline code, X-Frame-Options, nosniff; 10 failed logins in 15 min lock the client out without hashing | Plain HTTP: the password and pages travel in clear |
+| A web page in the admin's browser | POST to the service controls | Stop recognition (cross-site request) | Per-process CSRF token in each form and a same-origin check on `Origin`/`Referer`; POST only; actions from a whitelist | None known |
+| Someone with the web login | System page | Stop recognition, read recent log lines | The login itself; sudoers allows only start, stop and restart of `facepipe`; the web cannot stop itself; every action is logged | A stopped service records no attendance until started again (shown on every page) |
+| Many clients at once | Web server | Exhaust memory or threads | At most 24 requests and 4 live viewers at a time; 30 s receive timeout; 4 KB request bodies; streamed downloads | None known |
 | Someone on the LAN | RTSP, port 8554 | Watch the live camera | Separate login; server off without it | RTSP Basic auth is plain text on the network |
 | Someone on the LAN | Path tricks in URLs | Read secrets or other files | Strict regexes for snapshot, evidence and photo paths; photos only for enrolled names | None known |
 | Someone who can enroll | Gallery folder names | Script injection on the page | Names are HTML-escaped; tabs and newlines in names are skipped | Filesystem access to the device is already full control |

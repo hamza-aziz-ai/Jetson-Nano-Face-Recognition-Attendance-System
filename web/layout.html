@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>$title &middot; $site</title>
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css?v=$version">
+</head>
+<body data-page="$page" data-refresh="$refresh">
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+ <div class="bar">
+  <a class="brand" href="/"><img src="/static/logo.svg" alt="" width="28" height="28"><span>$site</span></a>
+  <nav class="menu" aria-label="Main">$nav</nav>
+  <span id="status" class="pill $state" role="status" aria-live="polite">$detail</span>
+ </div>
+</header>
+<main id="main">
+$flash
+$body
+</main>
+<footer>facepipe v$version &middot; Jetson Nano &middot; on-device recognition, no data leaves this device &middot; page generated $now</footer>
+<script src="/static/app.js?v=$version"></script>
+</body>
+</html>

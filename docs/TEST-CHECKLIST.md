@@ -74,3 +74,12 @@ v1.1.2 check on the Nano (2026-11-06):
 | Check | Command | Result |
 | --- | --- | --- |
 | Clip pre-roll | 26 s test video (8 s empty, 10 s face, 8 s empty) through a test instance with `GST_DEBUG=h264parse:2` | before: buffer 3.2 s, clip 0.23 s, parser drops every frame; after `idrinterval=15`: clip 8.2 s, 2.6 MB, 3.2 s pre-roll, 0 parser warnings |
+
+v1.2.0 checks on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Web self-test on Python 3.6 | `python3 web.py --selftest` | ok: login and failed login, 5 pages with CSP, escaped hostile name, Range 206, POST refused without Origin, wrong token, other site, unknown action, 4 KB+ body |
+| Pages with real data | second instance on port 8001 with a temporary test login | Overview, Live, Attendance, People, System all 200; 1 person; camera shown as "CSI camera, sensor 0" |
+| Service control | Restart button on the test instance | 303 to `/system?msg=restarted`; facepipe log: stopping, stopped (3 s), started; web log: "service restart from the website; now active" |
+| Sudoers rule | `sudo visudo -cf` then install | parsed OK; `/etc/sudoers.d/facepipe-web` mode 0440 |

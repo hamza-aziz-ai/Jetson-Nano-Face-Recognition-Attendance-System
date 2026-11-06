@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-07
+
+### Added
+
+- Multi-page website (D-033): Overview, Live, Attendance, People and System, with one layout and navigation; the live camera view has its own page.
+- Start, Stop and Restart of the recognition service from the System page, through a sudoers rule limited to those three commands (`deploy/install.sh` installs it); a stop is kept across automatic updates (`data/desired`).
+- System page: frame and detection rates, camera, storage, last update and recent log lines.
+
+### Changed
+
+- Styles and scripts moved to `web/` files, so the Content-Security-Policy allows no inline code; the match bar uses `<meter>`.
+- Downloads and clips are streamed in chunks instead of being read into memory; the server limits concurrent requests (24), live viewers (4), request bodies (4 KB) and slow clients (30 s).
+- Failed logins: 10 in 15 minutes lock that client out without hashing.
+
 ## [1.1.2] - 2026-11-06
 
 ### Fixed
@@ -123,7 +137,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.3...v1.1.0

@@ -16,7 +16,7 @@ Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000
                         FACEPIPE_LOGS; log: $FACEPIPE_LOGS/<year>/<Month>/web.log, rotated daily like facepipe.log)
 Self-check:  python3 web.py --selftest
 """
-import base64, csv, datetime, getpass, hashlib, hmac, html, io, json, os, re, socketserver, sys, threading, time
+import base64, csv, datetime, fcntl, getpass, hashlib, hmac, html, io, json, os, re, socket, socketserver, string, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -216,218 +216,283 @@ def hms(iso):
     return clock(iso, True)
 
 
-# ---------- pages ----------
-CSS = """
-:root{--bg:#f5f6f8;--card:#fff;--ink:#1d2433;--muted:#5b6475;--line:#e3e6ec;--accent:#2457c5;--ok:#1a7f4b;--okbg:#e5f4ec;
---warn:#9a5b00;--warnbg:#fdf1dc;--bad:#b42318;--badbg:#fde8e7}
-*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif}
-a{color:var(--accent)}:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-header{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
-.bar{max-width:1100px;margin:0 auto;padding:.7rem 1.2rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
-.brand{font-weight:650;font-size:1.05rem;display:flex;align-items:center;gap:.5rem;margin-right:auto}
-.brand svg{width:26px;height:26px}
-.pill{display:inline-flex;align-items:center;gap:.4rem;padding:.25rem .7rem;border-radius:999px;font-size:.85rem;font-weight:550}
-.pill::before{content:"";width:.55rem;height:.55rem;border-radius:50%;background:currentColor}
-.live{color:var(--ok);background:var(--okbg)}.no_video{color:var(--warn);background:var(--warnbg)}.stopped{color:var(--bad);background:var(--badbg)}
-nav.date{display:flex;gap:.35rem;align-items:center}
-.btn,input[type=date],input[type=search]{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);
-border-radius:8px;padding:.38rem .7rem;text-decoration:none;cursor:pointer;line-height:1.2}
-.btn:hover{border-color:var(--accent)}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn[aria-disabled=true]{opacity:.45;pointer-events:none}
-main{max-width:1100px;margin:0 auto;padding:1.2rem}
-h1{font-size:1.45rem;margin:.2rem 0 1rem}h2{font-size:1.1rem;margin:0}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.9rem;margin-bottom:1.2rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem}
-.card .k{color:var(--muted);font-size:.85rem}.card .v{font-size:1.8rem;font-weight:650;margin-top:.15rem}
-.card .s{color:var(--muted);font-size:.85rem}
-section{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:1.2rem}
-.sh{display:flex;align-items:center;gap:.8rem;padding:.9rem 1.1rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.sh .count{color:var(--muted);font-weight:500}.sh input{margin-left:auto;min-width:14rem}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:.55rem 1.1rem;border-bottom:1px solid var(--line);vertical-align:middle}
-th{font-size:.8rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600;white-space:nowrap}
-th button{all:unset;cursor:pointer}th button::after{content:" \\2195";opacity:.35}
-th[aria-sort=ascending] button::after{content:" \\2191";opacity:1}th[aria-sort=descending] button::after{content:" \\2193";opacity:1}
-tbody tr:hover{background:#fafbfc}tbody tr:last-child td{border-bottom:0}
-td.num{font-variant-numeric:tabular-nums}
-.who{display:flex;align-items:center;gap:.7rem;font-weight:550}
-.av{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--line);flex:none}
-.bar-m{display:inline-block;width:60px;height:6px;border-radius:3px;background:var(--line);vertical-align:middle;margin-right:.4rem}
-.bar-m i{display:block;height:100%;border-radius:3px;background:var(--ok)}
-.chips{display:flex;flex-wrap:wrap;gap:.6rem;padding:1rem 1.1rem}
-.chip{display:flex;align-items:center;gap:.5rem;border:1px solid var(--line);border-radius:999px;padding:.25rem .8rem .25rem .25rem}
-.chip .av{width:30px;height:30px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.8rem;padding:1rem 1.1rem}
-figure{margin:0;text-align:center;font-size:.82rem;color:var(--muted)}
-figure img{width:100%;aspect-ratio:1;border-radius:10px;object-fit:cover;background:var(--line);display:block;margin-bottom:.3rem}
-.empty{padding:1.2rem 1.1rem;color:var(--muted)}.muted{color:var(--muted)}
-.sh #livebtn{margin-left:auto}#livebox{padding:0 1.1rem 1.1rem}
-#liveimg{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#111;border-radius:10px}
-td.ev{white-space:nowrap}
-footer{max-width:1100px;margin:0 auto;padding:0 1.2rem 2rem;color:var(--muted);font-size:.82rem}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-@media (max-width:640px){.sh input{margin-left:0;width:100%}th:nth-child(5),td:nth-child(5){display:none}}
-@media print{header,.noprint,.sh input{display:none!important}body{background:#fff}section,.card{border-color:#bbb;break-inside:avoid}
-main{padding:0}tbody tr:hover{background:none}}
-"""
+# ---------- pages (D-033) ----------
+WEB_DIR = os.path.join(HERE, "web")
+STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "logo.svg": "image/svg+xml"}
+LAYOUT = string.Template(open(os.path.join(WEB_DIR, "layout.html"), encoding="utf-8").read())
+PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
+         ("people", "/people", "People"), ("system", "/system", "System")]
+CSP = ("default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
+       "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+FLASH = {  # fixed messages only: the query string never reflects text into the page
+    "started": ("ok", "Recognition service started."), "stopped": ("ok", "Recognition service stopped. It stays stopped, also across updates, until you start it."),
+    "restarted": ("ok", "Recognition service restarted."), "busy": ("bad", "An update or another action is running; try again in a minute."),
+    "failed": ("bad", "The action failed; see the log below."), "denied": ("bad", "The request was refused (expired form or another site).")}
+esc = html.escape
 
-JS = """
-(function(){
-  var today = document.body.dataset.today === "1";
-  var dp = document.getElementById("date");
-  dp.addEventListener("change", function(){ if (dp.value) dp.form.submit(); });
-  document.getElementById("print").addEventListener("click", function(){ window.print(); });
-  document.querySelectorAll("table[data-sort]").forEach(function(t){
-    t.querySelectorAll("th[data-k]").forEach(function(th, i){
-      th.querySelector("button").addEventListener("click", function(){
-        var asc = th.getAttribute("aria-sort") !== "ascending";
-        t.querySelectorAll("th").forEach(function(h){ h.removeAttribute("aria-sort"); });
-        th.setAttribute("aria-sort", asc ? "ascending" : "descending");
-        var col = th.cellIndex, rows = Array.prototype.slice.call(t.tBodies[0].rows);
-        rows.sort(function(a, b){
-          var x = a.cells[col].dataset.v, y = b.cells[col].dataset.v, nx = parseFloat(x), ny = parseFloat(y);
-          var c = (!isNaN(nx) && !isNaN(ny)) ? nx - ny : x.localeCompare(y);
-          return asc ? c : -c;
-        });
-        rows.forEach(function(r){ t.tBodies[0].appendChild(r); });
-      });
-    });
-  });
-  var q = document.getElementById("q");
-  if (q) q.addEventListener("input", function(){
-    var s = q.value.trim().toLowerCase();
-    document.querySelectorAll("[data-name]").forEach(function(el){
-      el.hidden = s && el.dataset.name.indexOf(s) < 0;
-    });
-  });
-  var pill = document.getElementById("status");
-  function poll(){
-    fetch("/api/status", {credentials: "same-origin", cache: "no-store"}).then(function(r){ return r.json(); }).then(function(s){
-      pill.className = "pill " + s.state; pill.textContent = s.detail;
-    }).catch(function(){ pill.className = "pill stopped"; pill.textContent = "Page cannot reach the device"; });
-  }
-  setInterval(poll, 10000);
-  var lb = document.getElementById("livebtn"), box = document.getElementById("livebox"), img = document.getElementById("liveimg");
-  if (lb) lb.addEventListener("click", function(){
-    var show = box.hidden;
-    box.hidden = !show;
-    lb.setAttribute("aria-expanded", show ? "true" : "false");
-    lb.textContent = show ? "Hide live view" : "Show live view";
-    if (show) img.src = "/live.mjpg?t=" + Date.now(); else img.removeAttribute("src");  // closing it stops the stream
-  });
-  if (today) setInterval(function(){
-    if (!document.hidden && !(q && q.value) && !(box && !box.hidden)) location.reload();
-  }, 30000);
-})();
-"""
 
-LOGO = ("<svg viewBox='0 0 24 24' aria-hidden='true'><rect width='24' height='24' rx='6' fill='#2457c5'/>"
-        "<circle cx='12' cy='10' r='3.6' fill='none' stroke='#fff' stroke-width='1.8'/>"
-        "<path d='M5.5 19c1.3-3 3.7-4.4 6.5-4.4s5.2 1.4 6.5 4.4' fill='none' stroke='#fff' stroke-width='1.8' stroke-linecap='round'/></svg>")
-FAVICON = "data:image/svg+xml," + quote(LOGO.replace("aria-hidden='true'", "xmlns='http://www.w3.org/2000/svg'"))
+def layout(page_id, title, body, flash="", refresh=False):
+    st = status()
+    nav = "".join("<a href='%s'%s>%s</a>" % (href, " aria-current='page'" if pid == page_id else "", label)
+                  for pid, href, label in PAGES)
+    msg = ""
+    if flash in FLASH:
+        kind, text = FLASH[flash]
+        msg = "<div class='flash %s' role='status'>%s</div>" % (kind, esc(text))
+    return LAYOUT.substitute(title=esc(title), site=esc(SITE), page=page_id, refresh="1" if refresh else "0", nav=nav,
+                             state=st["state"], detail=esc(st["detail"]), flash=msg, body=body, version=esc(VERSION),
+                             now=hms(datetime.datetime.now().isoformat()))
 
 
 def evidence(e):
     """links to the full-frame image and the event clip (recordings volume), if they exist"""
     out = []
     if e.get("frame") and REC_RE.match(e["frame"]):
-        out.append("<a href='/rec/%s' target='_blank' rel='noopener'>Frame</a>" % html.escape(e["frame"]))
+        out.append("<a href='/rec/%s' target='_blank' rel='noopener'>Frame</a>" % esc(e["frame"]))
     if e.get("clip") and REC_RE.match(e["clip"]):
-        out.append("<a href='/rec/%s' target='_blank' rel='noopener'>Clip</a>" % html.escape(e["clip"]))
+        out.append("<a href='/rec/%s' target='_blank' rel='noopener'>Clip</a>" % esc(e["clip"]))
     return " &middot; ".join(out) or "<span class='muted'>&ndash;</span>"
 
 
-def page(day, today, nonce, host="this-device"):
-    esc = html.escape
+def avatar(n, gal):
+    return "<img class='av' src='/photo/%s' alt='' loading='lazy'>" % quote(n) if n in gal else "<span class='av'></span>"
+
+
+def summary_cards(people, unknown, gal, st):
+    present = len([n for n in people if n in gal])
+    rate = "%d%% of %d enrolled" % (round(100.0 * present / len(gal)), len(gal)) if gal else "no one enrolled"
+    last = max([p["last"] for p in people.values()] + [e["time"] for e in unknown], default="")
+    return """<div class="cards">
+ <div class="card"><div class="k">Present</div><div class="v">%d</div><div class="s">%s</div></div>
+ <div class="card"><div class="k">Absent</div><div class="v">%d</div><div class="s">of the enrolled list</div></div>
+ <div class="card"><div class="k">Unknown faces</div><div class="v">%d</div><div class="s">not matched to anyone</div></div>
+ <div class="card"><div class="k">Last activity</div><div class="v">%s</div><div class="s">%s</div></div>
+</div>""" % (len(people), rate, len([n for n in gal if n not in people]), len(unknown), hm(last) or "&ndash;",
+             "last face seen" if last else "nothing seen yet")
+
+
+def page_overview():
+    today = datetime.date.today().isoformat()
+    events = read_events(today)
+    people, unknown = attendance(events)
+    gal = enrolled()
+    st = status()
+    recent = sorted(events, key=lambda e: e["ts"], reverse=True)[:8]
+    rows = "".join(
+        "<tr><td><div class='who'><img class='av' src='/snap/%s' alt=''>%s</div></td><td class='num'>%s</td>"
+        "<td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
+        % (esc(e["snap"]), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
+           e["score"], evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
+    act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match</th>"
+           "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % rows) if rows else \
+        "<p class='empty'>No faces seen yet today.</p>"
+    svc = ("<div class='card'><div class='k'>Recognition</div><div class='v'><span class='pill %s'>%s</span></div>"
+           "<div class='s'>%s</div></div>" % (st["state"], {"live": "Running", "no_video": "No video", "stopped": "Stopped"}[st["state"]],
+                                               esc(st["detail"])))
+    body = """<h1>Overview</h1><p class="sub">%s</p>%s
+<div class="cards">%s
+ <div class="card"><div class="k">Detection</div><div class="v">%s</div><div class="s">detections per second (lower when no one is in view)</div></div>
+ <div class="card"><div class="k">Enrolled</div><div class="v">%d</div><div class="s"><a href="/people">see people</a></div></div>
+</div>
+<section aria-labelledby="h-act"><div class="sh"><h2 id="h-act">Recent activity</h2><span class="count">today</span>
+ <span class="end"><a class="btn" href="/live">Live view</a><a class="btn primary" href="/attendance">Full attendance</a></span></div>%s</section>""" % (
+        datetime.date.today().strftime("%A, %d %B %Y"), summary_cards(people, unknown, gal, st), svc,
+        "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;", len(gal), act)
+    return layout("overview", "Overview", body, refresh=True)
+
+
+def page_live(host):
+    rtsp = ("<p class='body muted'>Also as a video stream for VLC or an NVR: <code>rtsp://%s:%s/live</code> (separate RTSP login).</p>"
+            % (esc(host), RTSP_PORT)) if os.path.exists(RTSP_AUTH) else ""
+    body = """<h1>Live</h1><p class="sub">The camera with recognition overlay: amber while recognizing, green with the name, red for unknown.</p>
+<section aria-labelledby="h-live"><div class="sh"><h2 id="h-live">Camera</h2><span class="count">annotated on the device</span>
+ <span class="end"><button class="btn" id="livebtn" type="button">Pause</button></span></div>
+<img id="liveimg" class="video" alt="Live camera view with face boxes and names">%s</section>""" % rtsp
+    return layout("live", "Live", body)
+
+
+def page_attendance(day, today):
     people, unknown = attendance(read_events(day))
     gal = enrolled()
-    absent = sorted(n for n in gal if n not in people)
     st = status()
+    absent = sorted(n for n in gal if n not in people)
     d = datetime.date(*map(int, day.split("-")))
     prev_d, next_d = (d - datetime.timedelta(days=1)).isoformat(), (d + datetime.timedelta(days=1)).isoformat()
     is_today = day == today
-    rate = "%d%% of %d enrolled" % (round(100.0 * len([n for n in people if n in gal]) / len(gal)), len(gal)) if gal else "no one enrolled"
-    last = max((p["last"] for p in people.values()), default="")
-    last_any = max([last] + [e["time"] for e in unknown]) if (last or unknown) else ""
-
-    def avatar(n):
-        return "<img class='av' src='/photo/%s' alt='' loading='lazy'>" % quote(n) if n in gal else "<span class='av'></span>"
-
     rows = []
     for n, p in sorted(people.items(), key=lambda kv: kv[1]["first"]):
-        pct = max(0, min(100, int(p["best"] * 100)))
         rows.append(
             "<tr data-name='%s'><td data-v='%s'><div class='who'><img class='av' src='/snap/%s' alt='Face seen at %s'>%s%s</div></td>"
             "<td class='num' data-v='%s'>%s</td><td class='num' data-v='%s'>%s</td><td class='num' data-v='%d'>%d</td>"
-            "<td class='num' data-v='%.3f'><span class='bar-m'><i style='width:%d%%'></i></span>%.2f</td><td class='ev'>%s</td></tr>"
+            "<td class='num' data-v='%.3f'><meter min='0' max='1' value='%.3f'></meter>%.2f</td><td class='ev'>%s</td></tr>"
             % (esc(display_name(n).lower()), esc(display_name(n).lower()), esc(p["snap"]), hms(p["first"]), esc(display_name(n)),
                "" if n in gal else " <small>(no longer enrolled)</small>", p["first"], hms(p["first"]), p["last"], hms(p["last"]),
-               p["sightings"], p["sightings"], p["best"], pct, p["best"], evidence(p)))
-    present_html = (
+               p["sightings"], p["sightings"], p["best"], max(0.0, min(1.0, p["best"])), p["best"], evidence(p)))
+    present = (
         "<table data-sort><thead><tr><th data-k scope='col'><button>Name</button></th><th data-k scope='col'><button>First seen</button></th>"
         "<th data-k scope='col'><button>Last seen</button></th><th data-k scope='col'><button>Sightings</button></th>"
         "<th data-k scope='col'><button>Best match</button></th><th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>"
-        % "".join(rows)
-        if rows else "<p class='empty'>No one recognized %s.</p>" % ("yet today" if is_today else "on this day"))
+        % "".join(rows)) if rows else "<p class='empty'>No one recognized %s.</p>" % ("yet today" if is_today else "on this day")
     absent_html = ("<div class='chips'>%s</div>" % "".join(
-        "<span class='chip' data-name='%s'>%s%s</span>" % (esc(display_name(n).lower()), avatar(n), esc(display_name(n)))
+        "<span class='chip' data-name='%s'>%s%s</span>" % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)))
         for n in absent)) if absent else "<p class='empty'>%s</p>" % ("Everyone enrolled is present." if gal else "No one is enrolled yet.")
     unknown_html = ("<div class='grid'>%s</div>" % "".join(
         "<figure><img src='/snap/%s' alt='Unknown face at %s' loading='lazy'><figcaption>%s &middot; %.2f<br>%s</figcaption></figure>"
         % (esc(e["snap"]), hms(e["time"]), hms(e["time"]), e["score"], evidence(e)) for e in reversed(unknown))
                     ) if unknown else "<p class='empty'>No unknown faces.</p>"
-
-    return """<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{site} &middot; {nice}</title><link rel="icon" href="{fav}"><style nonce="{nonce}">{css}</style></head>
-<body data-today="{tflag}">
-<header><div class="bar">
- <div class="brand">{logo}<span>{site}</span></div>
- <span id="status" class="pill {state}" role="status" aria-live="polite">{detail}</span>
- <nav class="date" aria-label="Choose date">
-  <a class="btn" href="/?date={prev}" aria-label="Previous day">&lsaquo;</a>
-  <form method="get" action="/"><label class="sr" for="date">Date</label>
-   <input id="date" type="date" name="date" value="{day}" max="{today}"></form>
-  <a class="btn" href="/?date={next}" aria-label="Next day" {nextdis}>&rsaquo;</a>
-  <a class="btn" href="/" {todaydis}>Today</a>
- </nav>
- <a class="btn primary noprint" href="/csv?date={day}">Export CSV</a>
- <button class="btn noprint" type="button" id="print">Print</button>
-</div></header>
-<main>
-<h1>Attendance &middot; {nice}</h1>
-<div class="cards">
- <div class="card"><div class="k">Present</div><div class="v">{n_present}</div><div class="s">{rate}</div></div>
- <div class="card"><div class="k">Absent</div><div class="v">{n_absent}</div><div class="s">of the enrolled list</div></div>
- <div class="card"><div class="k">Unknown faces</div><div class="v">{n_unknown}</div><div class="s">not matched to anyone</div></div>
- <div class="card"><div class="k">Last activity</div><div class="v">{last_hm}</div><div class="s">{last_s}</div></div>
-</div>
-{live}
-<section aria-labelledby="h-present"><div class="sh"><h2 id="h-present">Present</h2><span class="count">{n_present}</span>
- <label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></div>{present}</section>
-<section aria-labelledby="h-absent"><div class="sh"><h2 id="h-absent">Absent</h2><span class="count">{n_absent}</span></div>{absent}</section>
-<section aria-labelledby="h-unknown" class="noprint"><div class="sh"><h2 id="h-unknown">Unknown faces</h2><span class="count">{n_unknown}</span></div>{unknown}</section>
-</main>
-<footer>facepipe v{version} &middot; Jetson Nano &middot; on-device recognition, no data leaves this device &middot; generated {now}{refresh}{rtsp}</footer>
-<script nonce="{nonce}">{js}</script>
-</body></html>""".format(
-        site=esc(SITE), nice=d.strftime("%A, %d %B %Y"), fav=FAVICON, nonce=nonce, css=CSS, js=JS, logo=LOGO,
-        tflag="1" if is_today else "0", state=st["state"], detail=esc(st["detail"]), prev=prev_d, next=next_d, day=day,
-        today=today, nextdis='aria-disabled="true" tabindex="-1"' if day >= today else "",
-        todaydis='aria-disabled="true" tabindex="-1"' if is_today else "",
-        n_present=len(people), rate=rate, n_absent=len(absent), n_unknown=len(unknown),
-        last_hm=hm(last_any) or "&ndash;", last_s="last face seen" if last_any else "nothing seen",
-        present=present_html, absent=absent_html, unknown=unknown_html,
-        version=esc(VERSION), now=hms(datetime.datetime.now().isoformat()), refresh=" &middot; refreshes every 30 s" if is_today else "",
-        live=LIVE_SECTION if is_today else "",
-        rtsp=(" &middot; video stream for VLC/NVR: rtsp://%s:%s/live (separate login)" % (esc(host), RTSP_PORT))
-        if os.path.exists(RTSP_AUTH) else "")
+    dis = 'aria-disabled="true" tabindex="-1"'
+    body = """<h1>Attendance</h1><p class="sub">%s</p>
+<div class="toolbar" role="group" aria-label="Choose date">
+ <a class="btn" href="/attendance?date=%s" aria-label="Previous day">&lsaquo;</a>
+ <form method="get" action="/attendance"><label class="sr" for="date">Date</label><input id="date" type="date" name="date" value="%s" max="%s"></form>
+ <a class="btn" href="/attendance?date=%s" aria-label="Next day" %s>&rsaquo;</a>
+ <a class="btn" href="/attendance" %s>Today</a><span class="grow"></span>
+ <a class="btn primary" href="/csv?date=%s">Export CSV</a><button class="btn" type="button" id="print">Print</button>
+</div>%s
+<section aria-labelledby="h-present"><div class="sh"><h2 id="h-present">Present</h2><span class="count">%d</span>
+ <span class="end"><label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></span></div>%s</section>
+<section aria-labelledby="h-absent"><div class="sh"><h2 id="h-absent">Absent</h2><span class="count">%d</span></div>%s</section>
+<section aria-labelledby="h-unknown" class="noprint"><div class="sh"><h2 id="h-unknown">Unknown faces</h2><span class="count">%d</span></div>%s</section>""" % (
+        d.strftime("%A, %d %B %Y"), prev_d, day, today, next_d, dis if day >= today else "", dis if is_today else "", day,
+        summary_cards(people, unknown, gal, st), len(people), present, len(absent), absent_html, len(unknown), unknown_html)
+    return layout("attendance", "Attendance", body, refresh=is_today)
 
 
-LIVE_SECTION = """<section class="noprint" aria-labelledby="h-live"><div class="sh"><h2 id="h-live">Live view</h2>
-<span class="count">camera with recognition overlay</span>
-<button class="btn" id="livebtn" type="button" aria-expanded="false" aria-controls="livebox">Show live view</button></div>
-<div id="livebox" hidden><img id="liveimg" alt="Live camera view with face boxes and names"></div></section>"""
+def page_people():
+    gal = enrolled()
+    today = datetime.date.today().isoformat()
+    people, _ = attendance(read_events(today))
+    cards = "".join(
+        "<div class='person' data-name='%s'>%s<div><div class='n'>%s</div><div class='m'>%d photo%s enrolled</div>%s</div></div>"
+        % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)), c, "" if c == 1 else "s",
+           "<span class='badge in'>In today, %s</span>" % hm(people[n]["first"]) if n in people else "<span class='badge out'>Not seen today</span>")
+        for n, c in sorted(gal.items(), key=lambda kv: display_name(kv[0])))
+    body = """<h1>People</h1><p class="sub">Everyone the device recognizes. To add someone, put a few clear photos in <code>gallery/&lt;name&gt;/</code> and run <code>./facepipe-enroll gallery</code>; self-registration with approval is planned.</p>
+<section aria-labelledby="h-people"><div class="sh"><h2 id="h-people">Enrolled</h2><span class="count">%d</span>
+ <span class="end"><label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></span></div>%s</section>""" % (
+        len(gal), "<div class='people'>%s</div>" % cards if cards else "<p class='empty'>No one is enrolled yet.</p>")
+    return layout("people", "People", body)
+
+
+def camera_label():
+    """the camera from facepipe.env, without credentials"""
+    uri = ""
+    try:
+        for line in open(os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "facepipe.env"), encoding="utf-8"):
+            if line.startswith("FACEPIPE_URI="):
+                uri = line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    if uri.startswith("csi:"):
+        return "CSI camera, sensor %s" % uri[4:]
+    if uri.startswith("usb:"):
+        return "USB camera %s" % uri[4:]
+    if uri.startswith(("rtsp://", "http://", "https://")):
+        u = urlparse(uri)
+        return "%s camera at %s" % (u.scheme.upper(), u.hostname or "?")
+    return "video file" if uri.startswith("file://") else (uri and "other source") or "not set"
+
+
+def tail(path, n):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 64 * 1024))
+            return f.read().decode("utf-8", "replace").splitlines()[-n:]
+    except OSError:
+        return []
+
+
+def disk(path):
+    try:
+        v = os.statvfs(path)
+    except OSError:
+        return "not available"
+    total, free = v.f_blocks * v.f_frsize, v.f_bavail * v.f_frsize
+    return "%.1f GB free of %.1f GB" % (free / 1e9, total / 1e9) if total else "not available"
+
+
+def page_system(csrf, flash):
+    st = status()
+    active = service_state()
+    desired = read_desired()
+    now = datetime.datetime.now()
+    logdir = os.path.join(LOG_ROOT, str(now.year), MONTHS[now.month - 1])
+    log_lines = [l for l in tail(os.path.join(logdir, "facepipe.log"), 40) if "TensorRT" not in l][-15:]
+    upd = tail(os.path.join(logdir, "update.log"), 3)
+
+    def button(action, label, cls, confirm):
+        return ("<form method='post' action='/system/service' data-confirm='%s'><input type='hidden' name='csrf' value='%s'>"
+                "<input type='hidden' name='action' value='%s'><button class='btn %s' type='submit'>%s</button></form>"
+                % (esc(confirm), csrf, action, cls, label))
+    buttons = "".join([
+        button("start", "Start", "primary", "Start the recognition service?") if active != "active" else "",
+        button("restart", "Restart", "", "Restart the recognition service? Video stops for a few seconds.") if active == "active" else "",
+        button("stop", "Stop", "danger", "Stop the recognition service? No attendance is recorded until it is started again.")
+        if active == "active" else ""])
+    body = """<h1>System</h1><p class="sub">Service control, device status and recent log lines.</p>
+<section aria-labelledby="h-svc"><div class="sh"><h2 id="h-svc">Recognition service</h2><span class="pill %s">%s</span></div>
+<dl class="kv"><dt>systemd state</dt><dd>%s</dd><dt>Wanted state</dt><dd>%s</dd><dt>Frame rate</dt><dd>%s</dd>
+<dt>Detections per second</dt><dd>%s</dd><dt>Frames processed</dt><dd>%s</dd><dt>Camera</dt><dd>%s</dd></dl>
+<div class="actions">%s</div></section>
+<section aria-labelledby="h-dev"><div class="sh"><h2 id="h-dev">Device</h2></div>
+<dl class="kv"><dt>Software</dt><dd>facepipe %s (web %s)</dd><dt>Recordings volume</dt><dd>%s</dd><dt>App storage</dt><dd>%s</dd>
+<dt>Last update check</dt><dd>%s</dd></dl></section>
+<section aria-labelledby="h-log" class="noprint"><div class="sh"><h2 id="h-log">Recent log</h2><span class="count">facepipe.log</span></div>
+<pre class="log">%s</pre></section>""" % (
+        st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
+        "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
+        st.get("frames", "&ndash;"), esc(camera_label()), buttons, esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(REC_DIR)),
+        esc(disk(HERE)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
+    return layout("system", "System", body, flash=flash)
+
+
+# ---------- service control (D-033): exact sudoers rule for start/stop/restart of facepipe only ----------
+DESIRED = os.path.join(DATA, "desired")              # "stopped" keeps facepipe stopped across updates (deploy.sh reads it)
+LOCK = os.path.join(DATA, "update", "lock")          # shared with deploy/update.sh: no action during an update
+SYSTEMCTL = "/bin/systemctl"
+ACTIONS = ("start", "stop", "restart")
+
+
+def service_state():
+    try:
+        return subprocess.run([SYSTEMCTL, "is-active", "facepipe"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=5).stdout.decode().strip() or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def read_desired():
+    try:
+        return open(DESIRED).read().strip()
+    except OSError:
+        return "running"
+
+
+def service_action(action):
+    """runs `sudo -n systemctl <action> facepipe` under the update lock; returns a FLASH key"""
+    if action not in ACTIONS:
+        return "denied"
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, "a") as lk:
+        try:
+            fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return "busy"
+        with open(DESIRED + ".tmp", "w") as f:
+            f.write("stopped\n" if action == "stop" else "running\n")
+        os.replace(DESIRED + ".tmp", DESIRED)
+        try:
+            r = subprocess.run(["sudo", "-n", SYSTEMCTL, action, "facepipe"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            LOG.write("ERROR", "service %s failed: %s" % (action, e))
+            return "failed"
+    if r.returncode != 0:
+        LOG.write("ERROR", "service %s failed: %s" % (action, r.stderr.decode(errors="replace").strip()[:300]))
+        return "failed"
+    LOG.write("INFO", "service %s from the website; now %s" % (action, service_state()))
+    return {"start": "started", "stop": "stopped", "restart": "restarted"}[action]
 
 
 def csv_text(day):
@@ -454,20 +519,47 @@ def first_photo(name):
 
 
 # ---------- server ----------
+MAX_BODY = 4096       # forms here are tiny
+MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
+MAX_LIVE = 4          # concurrent MJPEG viewers
+FAIL_LIMIT, FAIL_WINDOW = 10, 900  # failed logins per client before refusing without hashing (PBKDF2 is costly)
+SECRET = os.urandom(32)            # per process: CSRF tokens end with a restart, forms then ask to reload
+
+
+def csrf_token(user):
+    return hmac.new(SECRET, ("csrf:" + user).encode(), hashlib.sha256).hexdigest()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "facepipe"
     sys_version = ""
+    timeout = 30  # a client that stops sending is dropped
 
-    def authorized(self):
+    def user(self):
+        """the logged-in user name, or None. Failed attempts are counted per client and throttled before hashing."""
         h = self.headers.get("Authorization", "")
         if not h.startswith("Basic "):
-            return False
+            return None
+        ip, now = self.client_address[0], time.time()
+        fails = [t for t in self.server.fails.get(ip, []) if now - t < FAIL_WINDOW]
+        if len(fails) >= FAIL_LIMIT:
+            return None
         try:
             user, pw = base64.b64decode(h[6:]).decode().split(":", 1)
         except Exception:
-            return False
+            user, pw = "", ""
         u, salt, digest = self.server.auth
-        return hmac.compare_digest(user, u) & hmac.compare_digest(hash_pw(pw, salt), digest)
+        if hmac.compare_digest(user, u) & hmac.compare_digest(hash_pw(pw, salt), digest):
+            return u
+        fails.append(now)
+        self.server.fails[ip] = fails
+        LOG.write("WARNING", "login failed from %s for %s" % (ip, self.path[:80]))
+        return None
+
+    def headers_common(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
 
     def send(self, code, body, ctype="text/html; charset=utf-8", extra=None, cache="no-store"):
         body = body if isinstance(body, bytes) else body.encode()
@@ -475,21 +567,30 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.headers_common()
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
-    def file(self, path):
-        """static file with HTTP Range support (browsers need it to seek in MP4 clips)"""
-        ctype = CTYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
+    def html_page(self, body):
+        self.send(200, body, extra={"Content-Security-Policy": CSP})
+
+    def redirect(self, where):
+        self.send_response(303)
+        self.send_header("Location", where)
+        self.send_header("Content-Length", "0")
+        self.headers_common()
+        self.end_headers()
+
+    def file(self, path, ctype=None, cache="private, max-age=86400"):
+        """file with HTTP Range support (browsers need it to seek in MP4 clips), streamed in 64 KB chunks"""
+        ctype = ctype or CTYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
         size = os.path.getsize(path)
         m = re.match(r"^bytes=(\d*)-(\d*)$", self.headers.get("Range", ""))
-        start, end = 0, size - 1
-        if m and (m.group(1) or m.group(2)):
+        start, end, partial = 0, size - 1, bool(m and (m.group(1) or m.group(2)))
+        if partial:
             if m.group(1):
                 start = int(m.group(1))
                 end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
@@ -497,25 +598,39 @@ class Handler(BaseHTTPRequestHandler):
                 start = max(0, size - int(m.group(2)))
             if start > end:
                 return self.send(416, "", "text/plain", {"Content-Range": "bytes */%d" % size})
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", cache)
+        if partial:
+            self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        self.headers_common()
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        left = end - start + 1
         with open(path, "rb") as f:
             f.seek(start)
-            body = f.read(end - start + 1)
-        extra = {"Accept-Ranges": "bytes"}
-        if m and (m.group(1) or m.group(2)):
-            extra["Content-Range"] = "bytes %d-%d/%d" % (start, end, size)
-            return self.send(206, body, ctype, extra, cache="private, max-age=86400")
-        self.send(200, body, ctype, extra, cache="private, max-age=86400")
+            while left > 0:
+                chunk = f.read(min(65536, left))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                left -= len(chunk)
 
     def live(self):
         """MJPEG: annotated frames from facepipe (NVJPG). Touching 'want' tells facepipe someone is watching."""
-        self.send_response(200)
-        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        os.makedirs(LIVE_DIR, exist_ok=True)
-        want, live, last, tick = os.path.join(LIVE_DIR, "want"), os.path.join(LIVE_DIR, "live.jpg"), 0, 0
+        if not self.server.live_slots.acquire(blocking=False):
+            return self.send(503, "Too many live viewers", "text/plain; charset=utf-8")
         try:
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.headers_common()
+            self.end_headers()
+            os.makedirs(LIVE_DIR, exist_ok=True)
+            want, live, last, tick = os.path.join(LIVE_DIR, "want"), os.path.join(LIVE_DIR, "live.jpg"), 0, 0
             while True:
                 now = time.time()
                 if now - tick > 3:
@@ -534,41 +649,61 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(data))
                     self.wfile.write(data + b"\r\n")
                 time.sleep(0.03)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, socket.timeout):
             pass  # viewer left
+        finally:
+            self.server.live_slots.release()
+
+    def same_origin(self):
+        """POST guard: the browser's Origin (or Referer) must name this host; other sites cannot post here"""
+        host = self.headers.get("Host", "")
+        src = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        return bool(host) and urlparse(src).netloc == host
+
+    def login_required(self):
+        return self.send(401, "Login required", "text/plain; charset=utf-8",
+                         {"WWW-Authenticate": 'Basic realm="%s", charset="UTF-8"' % SITE})
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
-        if not self.authorized():
-            if self.headers.get("Authorization"):  # a browser's first request carries none; this one had a wrong login
-                LOG.write("WARNING", "login failed from %s for %s" % (self.client_address[0], self.path[:80]))
-            return self.send(401, "Login required", "text/plain; charset=utf-8",
-                             {"WWW-Authenticate": 'Basic realm="%s", charset="UTF-8"' % SITE})
         url = urlparse(self.path)
-        today = datetime.date.today().isoformat()
-        day = parse_qs(url.query).get("date", [today])[0]
-        if not DATE_RE.match(day):
-            return self.send(400, "Bad date", "text/plain; charset=utf-8")
-        try:
-            datetime.date(*map(int, day.split("-")))
-        except ValueError:
-            return self.send(400, "Bad date", "text/plain; charset=utf-8")
+        if url.path.startswith("/static/") and url.path[8:] in STATIC:  # public assets, no data in them
+            return self.file(os.path.join(WEB_DIR, url.path[8:]), STATIC[url.path[8:]], cache="public, max-age=3600")
+        user = self.user()
+        if not user:
+            return self.login_required()
+        q = parse_qs(url.query)
         if url.path == "/":
-            nonce = base64.b64encode(os.urandom(12)).decode()
-            csp = ("default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'nonce-%s'; script-src 'nonce-%s'; "
-                   "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" % (nonce, nonce))
-            host = (self.headers.get("Host") or "this-device").rsplit(":", 1)[0]
-            return self.send(200, page(day, today, nonce, host), extra={"Content-Security-Policy": csp})
+            return self.html_page(page_overview())
+        if url.path == "/live":
+            return self.html_page(page_live((self.headers.get("Host") or "this-device").rsplit(":", 1)[0]))
+        if url.path in ("/attendance", "/csv"):
+            today = datetime.date.today().isoformat()
+            day = q.get("date", [today])[0]
+            try:
+                if not DATE_RE.match(day):
+                    raise ValueError(day)
+                datetime.date(*map(int, day.split("-")))
+            except ValueError:
+                return self.send(400, "Bad date", "text/plain; charset=utf-8")
+            if url.path == "/csv":
+                return self.send(200, "﻿" + csv_text(day), "text/csv; charset=utf-8",  # BOM: Excel opens UTF-8 names right
+                                 {"Content-Disposition": "attachment; filename=attendance-%s.csv" % day})
+            return self.html_page(page_attendance(day, today))
+        if url.path == "/people":
+            return self.html_page(page_people())
+        if url.path == "/system":
+            return self.html_page(page_system(csrf_token(user), q.get("msg", [""])[0]))
         if url.path == "/live.mjpg":
             return self.live()
+        if url.path == "/api/status":
+            return self.send(200, json.dumps(status()), "application/json")
         if url.path.startswith("/rec/") and REC_RE.match(url.path[5:]):
             path = os.path.join(REC_DIR, url.path[5:])
             if os.path.exists(path):
                 return self.file(path)
-        if url.path == "/api/status":
-            return self.send(200, json.dumps(status()), "application/json")
-        if url.path == "/csv":
-            return self.send(200, "﻿" + csv_text(day), "text/csv; charset=utf-8",  # BOM: Excel opens UTF-8 names right
-                             {"Content-Disposition": "attachment; filename=attendance-%s.csv" % day})
         if url.path.startswith("/snap/") and SNAP_RE.match(url.path[6:]):
             path = os.path.join(DATA, "snaps", url.path[6:])
             if os.path.exists(path):
@@ -577,6 +712,22 @@ class Handler(BaseHTTPRequestHandler):
             path = first_photo(unquote(url.path[7:]))
             if path:
                 return self.file(path)
+        self.send(404, "Not found", "text/plain; charset=utf-8")
+
+    def do_POST(self):
+        user = self.user()
+        if not user:
+            return self.login_required()
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_BODY:
+            return self.send(413, "Too large", "text/plain; charset=utf-8")
+        form = parse_qs(self.rfile.read(n).decode(errors="replace"))
+        token = form.get("csrf", [""])[0]
+        if not self.same_origin() or not hmac.compare_digest(token, csrf_token(user)):
+            LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_address[0]))
+            return self.redirect("/system?msg=denied")
+        if urlparse(self.path).path == "/system/service":
+            return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0]))
         self.send(404, "Not found", "text/plain; charset=utf-8")
 
     def log_message(self, fmt, *args):
@@ -588,6 +739,28 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
+    def __init__(self, *a, **kw):
+        HTTPServer.__init__(self, *a, **kw)
+        self.slots = threading.BoundedSemaphore(MAX_REQUESTS)
+        self.live_slots = threading.BoundedSemaphore(MAX_LIVE)
+        self.fails = {}
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):  # bounded threads: refuse instead of growing without limit
+            self.shutdown_request(request)
+            return
+        try:
+            socketserver.ThreadingMixIn.process_request(self, request, client_address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            socketserver.ThreadingMixIn.process_request_thread(self, request, client_address)
+        finally:
+            self.slots.release()
 
 
 def selftest():
@@ -627,9 +800,62 @@ def selftest():
     assert "Frame" in evidence({"frame": "2026-11-06/090000_7.jpg"}) and "Clip" not in evidence({"clip": "../x.mp4"})
     salt = b"x" * 16
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
-    html_ = page("2026-11-06", "2026-11-06", "n0nce")
-    assert "Attendance" in html_ and "nonce=\"n0nce\"" in html_ and ("facepipe v" + VERSION) in html_
+    assert service_action("rm -rf") == "denied" and camera_label() in camera_label()
+    assert csrf_token("a") == csrf_token("a") != csrf_token("b")
+    selftest_http()
     print("selftest ok")
+
+
+def selftest_http():
+    """a real server on a free port: login, pages, CSP, static files, Range, XSS escaping, POST guards"""
+    import urllib.request, urllib.error
+    day = datetime.date.today().isoformat()
+    os.makedirs(DATA, exist_ok=True)
+    with open(os.path.join(DATA, "events-%s.jsonl" % day), "a") as f:
+        f.write(json.dumps({"time": day + "T13:05:00", "ts": 1, "name": "<script>x</script>", "score": 0.7,
+                            "snap": "%s/130500_1.bmp" % day}) + chr(10))
+    srv = Server(("127.0.0.1", 0), Handler)
+    salt = b"s" * 16
+    srv.auth = ("admin", salt, hash_pw("secret123", salt))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    good = "Basic " + base64.b64encode(b"admin:secret123").decode()
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **kw):
+            return None  # report the 303 itself
+    opener = urllib.request.build_opener(NoRedirect)
+
+    def get(path, auth=good, headers=None, data=None):
+        h = dict(headers or {})
+        if auth:
+            h["Authorization"] = auth
+        req = urllib.request.Request(base + path, data=data, headers=h)
+        try:
+            r = opener.open(req, timeout=10)
+            return r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read()
+    assert get("/", auth=None)[0] == 401
+    assert get("/", auth="Basic " + base64.b64encode(b"admin:wrong").decode())[0] == 401
+    assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 401
+    for p in ("/", "/live", "/attendance", "/attendance?date=" + day, "/people", "/system"):
+        code, hd, body = get(p)
+        assert code == 200 and "script-src 'self'" in hd.get("Content-Security-Policy", ""), (p, code)
+        assert b"aria-current='page'" in body and b"<script>x" not in body, p
+    assert b"&lt;script&gt;x&lt;/script&gt;" in get("/attendance")[2]
+    assert get("/attendance?date=2026-02-30")[0] == 400 and get("/csv?date=../x")[0] == 400
+    code, hd, body = get("/static/app.js", headers={"Range": "bytes=0-9"})
+    assert code == 206 and len(body) == 10 and hd["Content-Range"].startswith("bytes 0-9/")
+    host = "127.0.0.1:%d" % srv.server_address[1]
+    form = ("csrf=%s&action=nothing" % csrf_token("admin")).encode()
+    # no Origin: refused; wrong token: refused; right token and origin, unknown action: refused by the whitelist
+    for hd, d in (({}, form), ({"Origin": "http://" + host}, b"csrf=bad&action=start"),
+                  ({"Origin": "http://evil.example"}, form), ({"Origin": "http://" + host}, form)):
+        code, h2, _ = get("/system/service", headers=hd, data=d)
+        assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))
+    assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
+    srv.shutdown()
 
 
 if __name__ == "__main__":

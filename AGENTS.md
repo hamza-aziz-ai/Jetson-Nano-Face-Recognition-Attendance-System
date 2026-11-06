@@ -24,7 +24,7 @@ logs: logs/<year>/<Month>/{facepipe,web,enroll}.log, daily backups <module>.log.
 Key files:
 
 - `facepipe.cpp`: the whole pipeline, enrollment (`-DFACEPIPE_ENROLL` build), `--selftest`, `--version`.
-- `web.py`: dashboard, login (PBKDF2 hash in `web_auth`), `--selftest`, `--set-password`, `--set-rtsp-password`.
+- `web.py` + `web/` (layout, CSS, JS): website with Overview, Live, Attendance, People, System (service control via an exact sudoers rule), login (PBKDF2 hash in `web_auth`), `--selftest` (starts a real server), `--set-password`, `--set-rtsp-password`.
 - `Makefile`, `VERSION`, `CHANGELOG.md`, `facepipe.env.example`.
 - `deploy/`: `install.sh` (portable install), `deploy.sh` (build, test, package, install, health check, rollback), unit templates `*.service.in`.
 - `ci/` and `.github/workflows/`: CI (scan, docs check, Python 3.6 self-test, compile against pinned JetPack headers, cppcheck, Mermaid), release on `v*.*.*` tags, deploy on the self-hosted runner.
