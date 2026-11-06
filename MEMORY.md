@@ -25,7 +25,7 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 
 ## Owner decisions 2026-11-07 (D-034)
 
-- Next work, in this order: registration by invitation (v1.3), then the Cameras page (source choice CSI/USB/RTSP, RTSP list with enable/disable, one active), then two RTSP cameras at once. Video upload after those.
+- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (source choice CSI/USB/RTSP, RTSP list with enable/disable, one active), then two RTSP cameras at once. Video upload after those.
 - Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
 
 ## Next (owner's request of 2026-11-06, in order)

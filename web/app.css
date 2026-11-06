@@ -66,6 +66,19 @@ td.ev{white-space:nowrap}
 footer{max-width:1180px;margin:0 auto;padding:0 1.2rem 2rem;color:var(--muted);font-size:.82rem}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 [hidden]{display:none!important}
+.pill:empty{display:none}
+.form{display:grid;gap:1rem;max-width:36rem}.field{display:grid;gap:.3rem}.field span{font-weight:600}
+.field input[type=text],.field input:not([type]),.field input[name=name]{font:inherit;border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem}
+.check{display:flex;gap:.6rem;align-items:flex-start;color:var(--muted)}.check input{margin-top:.3rem}
+.copy{display:flex;gap:.5rem}.copy input{flex:1;font:inherit;border:1px solid var(--line);border-radius:8px;padding:.45rem .7rem;background:#f8fafc}
+section.invite{border-color:var(--accent)}
+.subs{display:grid;gap:.9rem;padding:1rem 1.15rem}
+.sub-card{border:1px solid var(--line);border-radius:12px;padding:.9rem}
+.sub-head{display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap}.sub-head .n{font-weight:650}.sub-head .m{color:var(--muted);font-size:.85rem}
+.sub-acts{margin-left:auto;display:flex;gap:.5rem}.sub-acts form,.person-acts form{margin:0}
+.thumbs{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.7rem}.thumbs img{width:96px;height:96px;object-fit:cover;border-radius:10px;background:var(--line)}
+.badge.bad{color:var(--bad);background:var(--badbg)}.bad-text{color:var(--bad)!important}
+.person .grow{flex:1;min-width:0}.person-acts{display:flex;flex-direction:column;gap:.35rem}.person-acts .btn{font-size:.82rem;padding:.3rem .6rem}
 .stage{position:relative;background:#0b0f19}
 .tag{position:absolute;top:.8rem;left:.8rem;background:rgba(15,27,51,.85);color:#fff;font-weight:650;font-size:.85rem;
 padding:.25rem .7rem;border-radius:999px}

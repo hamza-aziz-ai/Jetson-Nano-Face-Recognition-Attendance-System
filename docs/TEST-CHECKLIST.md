@@ -98,3 +98,11 @@ v1.2.2 checks on the Nano (2026-11-07):
 | Self-test keeps the real log clean | line count of `logs/2026/November/web.log` around `python3 web.py --selftest` | selftest ok; 0 lines added |
 | Profile picture | `first_photo("hamza_aziz")` with the real gallery | `gallery/hamza_aziz/profile.jpg` |
 | Stop and Start from the website (v1.2.1) | owner's browser | Stop: facepipe `inactive (dead)`, clean stop in 0.18 s, wanted state `stopped`; Start: active again, 14.8 fps |
+
+v1.3.0 checks on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Photo check (CPU) | `CV_IO_MAX_IMAGE_PIXELS=40000000 ./facepipe-enroll --check <file> out.jpg` | text file: "not a readable image", exit 2; profile photo: 512x512, exit 0 |
+| Registration flow, self-test | `python3 web.py --selftest` (stand-in enroll binary) | ok: invitation, form, origin, too few photos, no consent, single use, admin-only photos, approve, reject deletes photos, remove |
+| Real approval beside live | real binaries, copy of the gallery, 3 of the owner's photos as "Test Person" | `--check` passed 3 photos; approve 16.9 s from 1321 MB free; "enrolled 14 photos of 2 people"; remove: "enrolled 11 photos of 1 people" |

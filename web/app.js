@@ -10,7 +10,7 @@
       .then(function (s) { pill.className = "pill " + s.state; pill.textContent = s.detail; })
       .catch(function () { pill.className = "pill stopped"; pill.textContent = "Page cannot reach the device"; });
   }
-  setInterval(poll, 10000);
+  if (page !== "register") setInterval(poll, 10000);  // the public page has no device status
 
   // sortable tables
   document.querySelectorAll("table[data-sort]").forEach(function (t) {
@@ -94,6 +94,51 @@
     });
     dlg.addEventListener("click", function (e) { if (e.target === dlg) { pending = null; dlg.close(); } });  // click outside
   }
+
+  // invitation link: copy to clipboard
+  var cp = document.getElementById("copylink");
+  if (cp) cp.addEventListener("click", function () {
+    var inp = document.getElementById("invlink");
+    inp.select();
+    (navigator.clipboard ? navigator.clipboard.writeText(inp.value) : Promise.reject()).then(function () {
+      cp.textContent = "Copied";
+    }, function () { document.execCommand("copy"); cp.textContent = "Copied"; });
+  });
+
+  // registration: shrink photos to 1600 px JPEG on the person's device (fast upload, no camera metadata), then send
+  var rf = document.getElementById("regform");
+  function shrink(file) {
+    return new Promise(function (ok) {
+      var url = URL.createObjectURL(file), im = new Image();
+      im.onload = function () {
+        var s = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement("canvas");
+        c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { ok(b || file); }, "image/jpeg", 0.92);
+      };
+      im.onerror = function () { URL.revokeObjectURL(url); ok(file); };  // the server says what is wrong with it
+      im.src = url;
+    });
+  }
+  if (rf) rf.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = rf.querySelector("button[type=submit]"), box = document.getElementById("regerr");
+    var files = Array.prototype.slice.call(rf.querySelector("input[type=file]").files);
+    btn.disabled = true; btn.textContent = "Sending…"; box.hidden = true;
+    Promise.all(files.map(shrink)).then(function (blobs) {
+      var fd = new FormData(rf);
+      fd.delete("photos");
+      blobs.forEach(function (b, i) { fd.append("photos", b, "photo" + (i + 1) + ".jpg"); });
+      return fetch("/register", { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "fetch" } });
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.ok) { location.href = j.next; return; }
+      box.textContent = j.error; box.hidden = false; btn.disabled = false; btn.textContent = "Send registration";
+    }).catch(function () {
+      box.textContent = "Could not send; check the connection and try again."; box.hidden = false;
+      btn.disabled = false; btn.textContent = "Send registration";
+    });
+  });
 
   // pages that show today's data refresh themselves, unless the user is searching or watching live
   if (document.body.dataset.refresh === "1" || page === "overview") setInterval(function () {
