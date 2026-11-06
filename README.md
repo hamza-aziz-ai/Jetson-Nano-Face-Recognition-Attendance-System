@@ -6,6 +6,8 @@
 ![C++](https://img.shields.io/badge/C%2B%2B-14-00599C?logo=cplusplus&logoColor=white)
 ![GStreamer](https://img.shields.io/badge/GStreamer-1.14-FF3131)
 ![Python](https://img.shields.io/badge/Python-3.6%20stdlib-3776AB?logo=python&logoColor=white)
+[![CI](https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System)](https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/releases)
 
 A standalone, fully offline face recognition attendance system that runs entirely on an **NVIDIA Jetson Nano 4 GB**. One camera in, attendance out: video decoding, face detection, tracking, recognition, the attendance log, evidence capture and a web dashboard all run on the device, with no server and no cloud.
 
@@ -96,7 +98,7 @@ Problems found and solved while building this, each verified on the device:
 
 ## Documentation
 
-Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITECTURE.md), [flow of one face](docs/FLOW.md), [decisions](docs/DECISIONS.md) and [alternatives](docs/ALTERNATIVES.md), [threat model](docs/THREAT.md), [failure map](docs/FAILURE.md), [data](docs/DATA.md), [assumptions](docs/ASSUMPTIONS.md), [test checklist](docs/TEST-CHECKLIST.md), [rollback](docs/ROLLBACK.md), [handover](docs/HANDOVER.md), and one write-up per [bug](docs/bugs/) and [feature](docs/features/).
+Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITECTURE.md), [flow of one face](docs/FLOW.md), [decisions](docs/DECISIONS.md) and [alternatives](docs/ALTERNATIVES.md), [threat model](docs/THREAT.md), [failure map](docs/FAILURE.md), [data](docs/DATA.md), [assumptions](docs/ASSUMPTIONS.md), [test checklist](docs/TEST-CHECKLIST.md), [rollback](docs/ROLLBACK.md), [handover](docs/HANDOVER.md), [releasing](docs/RELEASING.md) and the [changelog](CHANGELOG.md), and one write-up per [bug](docs/bugs/) and [feature](docs/features/).
 
 ## Getting started
 
@@ -158,7 +160,9 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | `facepipe.env.example` | All runtime settings |
 | `facepipe.service`, `facepipe-web.service` | systemd units |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
-| `Makefile` | Builds both binaries |
+| `Makefile` | Builds both binaries; `make check` compiles without linking (CI) |
+| `VERSION`, `CHANGELOG.md` | Current version and release notes (Semantic Versioning) |
+| `ci/`, `.github/workflows/` | CI checks and the release workflow |
 | `models/` | ONNX models and TensorRT engines (not in the repository) |
 
 ## Security and privacy

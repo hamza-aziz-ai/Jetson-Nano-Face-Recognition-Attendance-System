@@ -26,6 +26,10 @@ GALLERY_TSV = os.environ.get("FACEPIPE_GALLERY", os.path.join(DATA, "gallery.tsv
 AUTH_FILE = os.environ.get("FACEPIPE_WEB_AUTH", os.path.join(HERE, "web_auth"))  # outside DATA, never served
 PORT = int(os.environ.get("FACEPIPE_WEB_PORT", "8000"))
 SITE = os.environ.get("FACEPIPE_SITE", "Face Attendance")
+try:
+    VERSION = open(os.path.join(HERE, "VERSION")).read().strip()
+except OSError:
+    VERSION = "dev"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SNAP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/\d{6}_\d+\.(jpg|bmp)$")
 REC_DIR = os.environ.get("FACEPIPE_REC", "/mnt/rec")
@@ -334,7 +338,7 @@ def page(day, today, nonce, host="this-device"):
 <section aria-labelledby="h-absent"><div class="sh"><h2 id="h-absent">Absent</h2><span class="count">{n_absent}</span></div>{absent}</section>
 <section aria-labelledby="h-unknown" class="noprint"><div class="sh"><h2 id="h-unknown">Unknown faces</h2><span class="count">{n_unknown}</span></div>{unknown}</section>
 </main>
-<footer>Jetson Nano &middot; on-device recognition, no data leaves this device &middot; generated {now}{refresh}{rtsp}</footer>
+<footer>facepipe v{version} &middot; Jetson Nano &middot; on-device recognition, no data leaves this device &middot; generated {now}{refresh}{rtsp}</footer>
 <script nonce="{nonce}">{js}</script>
 </body></html>""".format(
         site=esc(SITE), nice=d.strftime("%A, %d %B %Y"), fav=FAVICON, nonce=nonce, css=CSS, js=JS, logo=LOGO,
@@ -344,7 +348,7 @@ def page(day, today, nonce, host="this-device"):
         n_present=len(people), rate=rate, n_absent=len(absent), n_unknown=len(unknown),
         last_hm=hm(last_any) or "&ndash;", last_s="last face seen" if last_any else "nothing seen",
         present=present_html, absent=absent_html, unknown=unknown_html,
-        now=datetime.datetime.now().strftime("%H:%M:%S"), refresh=" &middot; refreshes every 30 s" if is_today else "",
+        version=esc(VERSION), now=datetime.datetime.now().strftime("%H:%M:%S"), refresh=" &middot; refreshes every 30 s" if is_today else "",
         live=LIVE_SECTION if is_today else "",
         rtsp=(" &middot; video stream for VLC/NVR: rtsp://%s:%s/live (separate login)" % (esc(host), RTSP_PORT))
         if os.path.exists(RTSP_AUTH) else "")
@@ -530,7 +534,7 @@ def selftest():
     salt = b"x" * 16
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
     html_ = page("2026-11-06", "2026-11-06", "n0nce")
-    assert "Attendance" in html_ and "nonce=\"n0nce\"" in html_
+    assert "Attendance" in html_ and "nonce=\"n0nce\"" in html_ and ("facepipe v" + VERSION) in html_
     print("selftest ok")
 
 

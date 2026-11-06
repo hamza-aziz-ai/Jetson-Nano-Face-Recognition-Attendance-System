@@ -202,3 +202,17 @@ Chosen: 2, same practice as the companion CCTV repository
 Why: Text diagrams diff and review like code; images go stale silently. Each FLOW section has a diagram, a key mapping names to code and a numbered trace whose numbers match the diagram. Fixed colours: blue entry, green step, amber decision, purple outcome, red error, grey data stores; dotted arrows for optional or not-yet-built paths.
 Trade-off: The same-change rule alone drifts (seen in the CCTV repository), so CI renders every diagram with mermaid-cli 12.0.0 and the pull-request template asks which diagram sections a change touched. CI cannot check that a diagram is still true, only that it renders.
 Revisit if: diagrams are generated from code instead.
+
+## D-023: Semantic Versioning, one VERSION file, releases from tags
+Options:
+
+1. Untagged main
+2. Version from `git describe`
+3. A `VERSION` file, `CHANGELOG.md`, GitHub Releases from `vX.Y.Z` tags
+
+Chosen: 3
+Why: The device may build from a source archive with no git history, so the version must live in a file; Keep a Changelog notes become the release notes; the Release workflow reruns the full CI and refuses a tag that does not match `VERSION` or has no changelog section.
+Trade-off: Two places to edit when releasing (VERSION and CHANGELOG), checked by the workflow.
+Revisit if: releases become frequent enough to automate the bump.
+
+The first release is 0.9.0, not 1.0.0: 1.0.0 is reserved for when every item in the README validation table is verified on hardware.

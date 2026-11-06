@@ -8,7 +8,8 @@ EXTRA_INC ?=
 # CI uses -isystem so warnings inside NVIDIA headers do not fail -Werror (they are system headers on the device)
 INC ?= -I
 
-CXXFLAGS = -O2 -std=c++14 -Wall $(INC) $(DS)/sources/includes $(INC) $(CUDA)/include $(EXTRA_INC) \
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
+CXXFLAGS = -O2 -std=c++14 -Wall -DFACEPIPE_VERSION='"$(VERSION)"' $(INC) $(DS)/sources/includes $(INC) $(CUDA)/include $(EXTRA_INC) \
   $(shell pkg-config --cflags gstreamer-1.0 gstreamer-app-1.0) $(shell PKG_CONFIG_PATH=$(OPENCV_PC) pkg-config --cflags $(OPENCV_PKG))
 # gst-rtsp-server: runtime library only (no -dev package), linked by path; prototypes are in facepipe.cpp
 LDLIBS = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0) /usr/lib/aarch64-linux-gnu/libgstrtspserver-1.0.so.0 \
@@ -19,10 +20,10 @@ LDLIBS = $(shell pkg-config --libs gstreamer-1.0 gstreamer-app-1.0) /usr/lib/aar
 all: facepipe facepipe-enroll tracker.yml
 
 # live binary: no opencv_imgcodecs (its libjpeg clashes with the L4T libjpeg used by nvjpegenc)
-facepipe: facepipe.cpp
+facepipe: facepipe.cpp VERSION
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LDLIBS)
 
-facepipe-enroll: facepipe.cpp
+facepipe-enroll: facepipe.cpp VERSION
 	$(CXX) $(CXXFLAGS) -DFACEPIPE_ENROLL -o $@ $< $(LDLIBS) -lopencv_imgcodecs
 
 tracker.yml:

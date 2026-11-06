@@ -14,12 +14,17 @@ A change is done when CI is green and the relevant device checks pass, with the 
 
 Local run of the same Python job (2026-11-06): `Python 3.6.15`, `selftest ok`, `python checks ok`. `ci/scan.sh` negative test: a planted `rtsp_auth` file and a 192.168 address both failed the scan (exit 1).
 
+## Release (on a `vX.Y.Z` tag)
+
+The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG.md` section, then publishes the GitHub Release. See RELEASING.md.
+
 ## Device checks
 
 | Check | Command | Pass looks like |
 | --- | --- | --- |
 | Build | `make all` | No errors; `facepipe`, `facepipe-enroll`, `tracker.yml` exist |
 | Web self-test | `python3 web.py --selftest` | `selftest ok` |
+| Version | `./facepipe --version` | the `VERSION` file's content; same in `data/status.json` and the dashboard footer |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |
 | Live run | `FACEPIPE_DIR=. timeout -s INT 60 ./facepipe <source> 1920 1080` | `[facepipe] fps` near 15 with `FACEPIPE_DROP=2` on a 30 fps camera; known faces counted |
 | Embeddings vs reference | `python -I check_vs_rest.py <photos> <dir with faces.jsonl>` | Matching photos at cosine 0.96 or more |

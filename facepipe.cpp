@@ -52,6 +52,9 @@
 #include <unordered_map>
 #include <vector>
 
+#ifndef FACEPIPE_VERSION
+#define FACEPIPE_VERSION "dev"  // set from the VERSION file by the Makefile
+#endif
 static const int NET_W = 640, NET_H = 384;
 static const float DET_THRESH = 0.6f, NMS_THRESH = 0.4f;
 static const int MIN_FACE_PX = 40;   // ponytail: size gate only; add a pose/blur score if bad crops hurt matching
@@ -717,8 +720,8 @@ static gboolean report(gpointer) {
   // status.json for the web page (written to a temp file, then renamed so readers never see half a file)
   std::string tmp = DATA_DIR + "/status.json.tmp";
   if (FILE *s = fopen(tmp.c_str(), "w")) {
-    fprintf(s, "{\"updated\":%ld,\"fps\":%.1f,\"frames\":%ld,\"known\":%ld,\"unknown\":%ld,\"step\":%u}\n",
-            (long)time(nullptr), fps, f, (long)n_known, (long)n_unknown, frame_step());
+    fprintf(s, "{\"version\":\"%s\",\"updated\":%ld,\"fps\":%.1f,\"frames\":%ld,\"known\":%ld,\"unknown\":%ld,\"step\":%u}\n",
+            FACEPIPE_VERSION, (long)time(nullptr), fps, f, (long)n_known, (long)n_unknown, frame_step());
     fclose(s);
     rename(tmp.c_str(), (DATA_DIR + "/status.json").c_str());
   }
@@ -893,6 +896,7 @@ static int enroll(const std::string &root) {
 #endif
 
 int main(int argc, char **argv) {
+  if (argc == 2 && !strcmp(argv[1], "--version")) { printf("%s\n", FACEPIPE_VERSION); return 0; }
   std::string app_dir = env("FACEPIPE_DIR", ".");
   DATA_DIR = env("FACEPIPE_DATA", app_dir + "/data");
   REC_ENGINE = app_dir + "/models/r50_b16.plan";
@@ -919,7 +923,8 @@ int main(int argc, char **argv) {
   std::string uri = argv[1];
   bool camera = uri.rfind("csi:", 0) == 0 || uri.rfind("usb:", 0) == 0;
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
-  fprintf(stderr, "[facepipe] processing every %u frame(s), match >= %.2f, data %s\n", frame_step(), MATCH, DATA_DIR.c_str());
+  fprintf(stderr, "[facepipe] version %s, processing every %u frame(s), match >= %.2f, data %s\n", FACEPIPE_VERSION,
+          frame_step(), MATCH, DATA_DIR.c_str());
   gst_init(&argc, &argv);
   std::thread worker(rec_worker);
 

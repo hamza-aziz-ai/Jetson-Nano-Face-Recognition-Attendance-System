@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -30,8 +31,8 @@ jobs:
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then echo "no base, skipped"; exit 0; fi
           changed=$(git diff --name-only "$BASE" HEAD)
           echo "$changed"
-          code=$(echo "$changed" | grep -E '^(facepipe\.cpp|web\.py|Makefile|pgie_scrfd\.txt|.*\.service|facepipe\.env\.example|mlops/|deploy/)' || true)
-          docs=$(echo "$changed" | grep -E '^(docs/|README\.md)' || true)
+          code=$(echo "$changed" | grep -E '^(facepipe\.cpp|web\.py|Makefile|VERSION|pgie_scrfd\.txt|.*\.service|facepipe\.env\.example|mlops/|deploy/)' || true)
+          docs=$(echo "$changed" | grep -E '^(docs/|README\.md|CHANGELOG\.md)' || true)
           if [ -n "$code" ] && [ -z "$docs" ]; then echo "::error::code changed without a docs/ or README.md update"; exit 1; fi
           echo "docs check ok"
 

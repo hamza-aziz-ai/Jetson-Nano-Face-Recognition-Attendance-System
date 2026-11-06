@@ -2,6 +2,11 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## Update: 2026-11-06 night (model: Claude Opus 5.5)
+
+Done: Mermaid diagrams (ARCHITECTURE A1-A2, FLOW 1-4) rendered in CI, PR template (D-022). Versioning and releases: VERSION 0.9.0, CHANGELOG, Release workflow, docs/RELEASING.md (D-023). First release v0.9.0.
+Next: deploy v0.9.0 to the Nano when it is powered on (it was off for camera work); MLOps manifest; self-hosted runner deploy; LFW evaluation.
+
 ## Update: 2026-11-06 evening (model: Claude Opus 5.5)
 
 Done: CI on GitHub Actions (scan, docs check, Python 3.6 self-test, compile against JetPack 4.6 headers with cppcheck), D-020, D-021. Engineering docs added (Defend What You Ship).
