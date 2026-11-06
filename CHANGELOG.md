@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-06
+
+### Fixed
+
+- Event clips came out empty or short (owner's report): the encoder made an IDR keyframe only every 256 frames, so a clip usually started without SPS/PPS and its parser dropped frames until the next IDR. Every keyframe is now an IDR (1 s apart); clips are about 8 s with 3 s before the event. Each clip logs how much pre-roll it started with (docs/bugs/clips-empty-or-short.md).
+
 ## [1.1.1] - 2026-11-06
 
 ### Added
@@ -117,7 +123,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.2...v1.0.3

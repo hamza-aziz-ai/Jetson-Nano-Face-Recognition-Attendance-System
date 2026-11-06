@@ -16,7 +16,7 @@ Snapshot: **2026-11-06 23:35 IST**. Volatile state; verify before acting (see "S
 ## In progress
 
 1. **v1.0.3 released and deployed (healthy after 14 s, 14 fps).** Contents: daily log files in the owner's layout (D-030), clean bounded SIGTERM shutdown and watchdog fix (D-029), deploy health on the current `MainPID` with advancing frames, clip finalization result logged, 12-hour times on the web page. Verified on the Nano in a test instance: self-tests, log file format, clean stop in 2.7 s. CSI stall cause found: a killed camera process wedges nvargus-daemon (`SCF: Error Timeout`, then `InvalidState` for every client) until the daemon is restarted (docs/bugs/csi-start-stall.md). Still to do: restart after 20 min and after hours of CSI capture.
-2. **Empty clips (owner's report):** five 0-byte `*_clip.mp4` files today (four unknown events, one known), one 23 KB for 4.2 s. v1.0.3 logs how each clip ended; reproduce after deploying (owner in front of the camera; a high `FACEPIPE_MATCH` makes every face unknown).
+2. **Empty/short clips: cause found and fixed in v1.1.2** (IDR only every 256 frames; idrinterval=15). PR fix/clip-preroll.
 3. **v1.1.0: adaptive detection (D-028), this commit.** Own SCRFD probe replacing nvinfer; same results as nvinfer on identical frames; empty scene 15 fps, 2.4 detections/s, GPU about 0%. Still to measure with a face present (owner): fps and delivery gaps during recognition.
 
 4. **v1.1.1: automatic deployment (D-031)**, owner chose a pull timer over the GitHub runner: `facepipe-update.timer` every 10 min runs `deploy/update.sh`. Units must be installed on the owner's Nano with approval of the exact files.

@@ -581,8 +581,10 @@ static std::string clip_trigger() {
   mkdir((REC_DIR + "/" + day).c_str(), 0755);
   std::string rel = day + "/" + hms + "_clip.mp4";
   GError *err = nullptr;
-  GstElement *p = gst_parse_launch(("appsrc name=s is-live=true format=time max-bytes=20000000 ! h264parse ! "
-                                    "mp4mux faststart=true ! filesink location=" + REC_DIR + "/" + rel).c_str(), &err);
+  // A plain file writer: the pre-roll arrives as one burst with past timestamps, so nothing here needs a clock.
+  GstElement *p = gst_parse_launch(("appsrc name=s is-live=false format=time max-bytes=20000000 ! h264parse ! "
+                                    "mp4mux faststart=true ! filesink sync=false async=false location=" + REC_DIR + "/" +
+                                    rel).c_str(), &err);
   if (!p) { LOGE("clip pipeline: %s", err ? err->message : "?"); if (err) g_error_free(err); return ""; }
   clip.pipe = p;
   clip.src = gst_bin_get_by_name(GST_BIN(p), "s");
@@ -593,6 +595,8 @@ static std::string clip_trigger() {
   clip.until = last_pts + CLIP_POST;
   clip.rel = rel;
   for (auto &a : ring) clip_push(a.buf, a.pts);
+  LOGI("clip %s: started with %.1f s before the event (%zu frames buffered)", rel.c_str(),
+       (double)(last_pts - clip.base) / GST_SECOND, ring.size());
   return rel;
 }
 
@@ -1323,7 +1327,11 @@ int main(int argc, char **argv) {
   g_signal_connect(sj, "new-sample", G_CALLBACK(on_jpeg), nullptr);
   g_object_set(qh, "leaky", 2, "max-size-buffers", 4, nullptr);
   set_caps(fh, "video/x-raw(memory:NVMM), format=NV12");
-  g_object_set(henc, "bitrate", 4000000, "iframeinterval", 15, "insert-sps-pps", TRUE, "bufapi-version", TRUE, nullptr);
+  // idrinterval = iframeinterval: every keyframe is an IDR with SPS/PPS in front. A clip starts at the newest keyframe in
+  // the ring; with the default IDR interval (256 frames) that was usually a plain I-frame, h264parse dropped every frame
+  // until the next IDR ("broken/invalid nal"), and clips came out short or empty (docs/bugs/clips-empty-or-short.md).
+  g_object_set(henc, "bitrate", 4000000, "iframeinterval", 15, "idrinterval", 15, "insert-sps-pps", TRUE,
+               "bufapi-version", TRUE, nullptr);
   g_object_set(hp, "config-interval", -1, nullptr);
   set_caps(fh2, "video/x-h264, stream-format=byte-stream, alignment=au");
   g_object_set(pay, "config-interval", 1, "pt", 96, nullptr);

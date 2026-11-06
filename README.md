@@ -263,7 +263,7 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | USB camera input | ✅ Logitech C270, MJPEG 1280x720 decoded on NVJPG, enrolled person recognized |
 | CSI camera input | ✅ Raspberry Pi HQ Camera (IMX477, R8 removed), 15 fps with all outputs, recognized at cosine 0.62-0.69 |
 | Attendance log, dashboard, CSV, login | ✅ Verified |
-| Event clips and full-frame evidence | ✅ Clips and 1080p evidence with the name drawn; clip pre-roll on the CSI camera is shorter than designed (under investigation) |
+| Event clips and full-frame evidence | ✅ About 8 s clips with 3 s before the event, and 1080p evidence with the name drawn |
 | RTSP stream | ✅ Plays in VLC with the RTSP login |
 | Adaptive detection | ✅ Same boxes and embeddings as before on identical frames (cosine 1.0000); 15 fps empty and occupied |
 | Clean shutdown, watchdog, daily logs | ✅ Verified |
@@ -286,6 +286,7 @@ Planned and agreed in a design review (D-033): **v1.2** multi-page website with 
 - **libjpeg ABI clash.** OpenCV `imgcodecs` and the L4T JPEG library cannot share a process ("JPEG parameter struct mismatch: library thinks size is 584, caller expects 728"), so enrollment is a separate binary.
 - **Wi-Fi camera at 4-5 fps.** RTSP over UDP lost packets on Wi-Fi; forcing TCP gave a steady 30 fps.
 - **USB webcam at half speed.** UVC cameras trade frame rate for exposure in dim light; the source sets `exposure_auto_priority=0`.
+- **Empty or short event clips.** The encoder made an IDR keyframe only every 256 frames, so clips usually started without SPS/PPS and the parser dropped frames; every keyframe is now an IDR.
 - **"Text file busy" on deploy.** Copying over a running binary fails; files are copied beside it and renamed.
 - **Missing development headers.** `gst-rtsp-server` ships only its runtime library on JetPack 4.6, so the few calls used are declared directly.
 
