@@ -37,17 +37,23 @@ It is built as a native C++ DeepStream application with custom TensorRT post-pro
 
 ```mermaid
 flowchart TD
-  SRC["`**Source**: RTSP or file (NVDEC), CSI (Argus ISP), USB (NVJPG decode)`"] --> DROP["`keep every Nth frame`"]
-  DROP --> MUX["`nvstreammux`"] --> DET["`nvinfer: SCRFD-10G 640x384, raw tensors`"]
-  DET --> P1["`probe: decode boxes and landmarks`"] --> TRK["`nvtracker (IOU)`"]
-  TRK --> P2["`probe: label, align 112x112`"] --> OSD["`nvdsosd: boxes and names`"]
-  P2 -. "`queue`" .-> REC["`recognition worker: ArcFace w600k_r50, gallery match`"]
-  REC --> LOG["`attendance events and snapshots`"]
-  OSD --> JPG["`nvjpegenc (NVJPG)`"] --> LIVE["`live view, evidence frames`"]
-  OSD --> ENC["`nvv4l2h264enc (NVENC)`"] --> OUT["`RTSP stream, event clips (mp4)`"]
-  LOG --> WEB["`web dashboard`"]
+  SRC["`**Source**: RTSP or file (NVDEC), CSI (Argus ISP), USB (NVJPG decode)`"]:::entry --> DROP["`keep every Nth frame`"]:::step
+  DROP --> MUX["`nvstreammux`"]:::step --> DET["`nvinfer: SCRFD-10G 640x384, raw tensors`"]:::step
+  DET --> P1["`probe: decode boxes and landmarks`"]:::step --> TRK["`nvtracker (IOU)`"]:::step
+  TRK --> P2["`probe: label, align 112x112`"]:::step --> OSD["`nvdsosd: boxes and names`"]:::step
+  P2 -. "`queue`" .-> REC["`recognition worker: ArcFace w600k_r50, gallery match`"]:::step
+  REC --> LOG[("`attendance events and snapshots`")]:::store
+  OSD --> JPG["`nvjpegenc (NVJPG)`"]:::step --> LIVE["`live view, evidence frames`"]:::outcome
+  OSD --> ENC["`nvv4l2h264enc (NVENC)`"]:::step --> OUT["`RTSP stream, event clips (mp4)`"]:::outcome
+  LOG --> WEB["`web dashboard`"]:::outcome
   LIVE --> WEB
+  classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+  classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef outcome fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
 ```
+
+Blue: source, green: processing, purple: outputs, grey: stored data. The [flows](docs/FLOW.md) trace each step to the code.
 
 ## Performance
 

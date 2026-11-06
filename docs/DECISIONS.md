@@ -191,3 +191,14 @@ Revisit if: a Jetson becomes available as a trusted CI machine for pull requests
 ## D-021: Actions drive old images with docker run
 Why: Current GitHub actions (Node 20) need a newer glibc than Ubuntu 18.04 and Python 3.6 images have, so jobs run actions on the host runner and the checks inside `docker run`.
 Trade-off: Slightly longer workflow files. NVIDIA headers are included with `-isystem` in CI (`INC=-isystem`): TensorRT 8.2's own headers use deprecated APIs and would fail `-Werror` as plain includes, while on the device they are system headers.
+
+## D-022: Diagrams as Mermaid in Markdown, rendered in CI
+Options:
+
+1. Image files (draw.io, Lucid exports)
+2. Mermaid blocks beside the prose they explain
+
+Chosen: 2, same practice as the companion CCTV repository
+Why: Text diagrams diff and review like code; images go stale silently. Each FLOW section has a diagram, a key mapping names to code and a numbered trace whose numbers match the diagram. Fixed colours: blue entry, green step, amber decision, purple outcome, red error, grey data stores; dotted arrows for optional or not-yet-built paths.
+Trade-off: The same-change rule alone drifts (seen in the CCTV repository), so CI renders every diagram with mermaid-cli 12.0.0 and the pull-request template asks which diagram sections a change touched. CI cannot check that a diagram is still true, only that it renders.
+Revisit if: diagrams are generated from code instead.

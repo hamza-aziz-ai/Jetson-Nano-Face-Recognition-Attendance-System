@@ -9,6 +9,7 @@ A change is done when CI is green and the relevant device checks pass, with the 
 | Secrets, IPs and biometric data | `sh ci/scan.sh` | `scan ok: N tracked files, no secrets, IPs or biometric data` |
 | Docs updated with code | Code changes must touch `docs/` or `README.md` | `docs check ok` |
 | Web self-test on Python 3.6 | `ci/python-checks.sh` in `python:3.6-slim` | `selftest ok`, `python checks ok` |
+| Mermaid diagrams render | `ci/mermaid-check.sh`: every Mermaid block in tracked Markdown rendered with mermaid-cli 12.0.0 | `mermaid ok: N diagrams rendered` |
 | Compile against JetPack 4.6 headers | `ci/compile-check.sh` in `ubuntu:18.04`: `make check` (both binaries, `-Werror`), cppcheck | `compile ok`, `cppcheck ok` |
 
 Local run of the same Python job (2026-11-06): `Python 3.6.15`, `selftest ok`, `python checks ok`. `ci/scan.sh` negative test: a planted `rtsp_auth` file and a 192.168 address both failed the scan (exit 1).

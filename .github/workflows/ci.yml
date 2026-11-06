@@ -55,3 +55,13 @@ jobs:
           key: jetpack-headers-${{ hashFiles('ci/jetpack-headers.sh') }}
       # Ubuntu 18.04 with GCC 7.5, like the Nano
       - run: docker run --rm -v "$PWD:/w" -w /w ubuntu:18.04 sh ci/compile-check.sh
+
+  diagrams:
+    name: Mermaid diagrams render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: sh ci/mermaid-check.sh
