@@ -1293,23 +1293,37 @@ int main(int argc, char **argv) {
 #ifdef FACEPIPE_ENROLL
   LOG_MODULE = "enroll";
 #endif
+  std::string cam_uri;
 #ifdef FACEPIPE_ENROLL
   if (argc == 4 && !strcmp(argv[1], "--check")) return check_photo(argv[2], argv[3]);
   if (argc == 2) return enroll(argv[1]);
   fprintf(stderr, "usage: %s <gallery_dir> | --check <photo> <out.jpg>\n", argv[0]);
   return 1;
 #else
-  if (argc < 2) {
+  // The camera chosen on the website's Cameras page (D-034): $FACEPIPE_CAMERAS, default data/cameras.active, one line
+  // "<uri> <width> <height>". It overrides the command line, so FACEPIPE_URI in facepipe.env is only the fallback.
+  {
+    std::ifstream cf(env("FACEPIPE_CAMERAS", DATA_DIR + "/cameras.active"));
+    std::string line;
+    if (cf && std::getline(cf, line)) {
+      std::istringstream ls(line);
+      int w = 0, h = 0;
+      ls >> cam_uri >> w >> h;
+      if (!cam_uri.empty() && w > 0 && h > 0) { mux_w = w; mux_h = h; }
+    }
+  }
+  if (argc < 2 && cam_uri.empty()) {
     fprintf(stderr, "usage: %s <rtsp://...|file://...|csi:0|usb:/dev/video0> [width height]\n"
                     "enroll photos with facepipe-enroll <gallery_dir>\n", argv[0]);
     return 1;
   }
 #endif
-  if (argc >= 4) { mux_w = atoi(argv[2]); mux_h = atoi(argv[3]); }
+  if (cam_uri.empty() && argc >= 4) { mux_w = atoi(argv[2]); mux_h = atoi(argv[3]); }
   json_out = fdopen(dup(1), "w");
   dup2(2, 1);
   std::string dir = env("FACEPIPE_DIR", ".");
-  std::string uri = argv[1];
+  std::string uri = cam_uri.empty() ? argv[1] : cam_uri;
+  if (!cam_uri.empty()) LOGI("camera chosen on the website, %dx%d", mux_w, mux_h);  // the URI may hold a password: not logged
   bool camera = uri.rfind("csi:", 0) == 0 || uri.rfind("usb:", 0) == 0;
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
   LOGI("version %s, processing every %u frame(s), match %s %s %.2f, data %s", FACEPIPE_VERSION,

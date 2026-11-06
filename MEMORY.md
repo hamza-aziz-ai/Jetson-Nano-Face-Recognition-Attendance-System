@@ -25,8 +25,12 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 
 ## Owner decisions 2026-11-07 (D-034)
 
-- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (source choice CSI/USB/RTSP, RTSP list with enable/disable, one active), then two RTSP cameras at once. Video upload after those.
+- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (v1.4, built in PR feat/cameras), then two RTSP cameras at once, then video upload, then a full enterprise-style redesign of the website (owner, 2026-11-07: after all features).
 - Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
+
+## Open question to the owner (2026-11-07)
+
+- Remote access over the internet through a Cloudflare Tunnel (home use). Proposed: Cloudflare Access in front (email code or Google login), `/register` bypass or registration only at home, the site to take the visitor address from `CF-Connecting-IP` only for tunnel requests (otherwise one person's failed logins lock everyone out), README/THREAT to say faces pass through Cloudflare when viewed remotely. Needs: the owner's domain on Cloudflare, the owner runs `cloudflared tunnel login`, approval of the cloudflared service.
 
 ## Next (owner's request of 2026-11-06, in order)
 

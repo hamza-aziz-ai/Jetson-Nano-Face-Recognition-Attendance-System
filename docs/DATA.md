@@ -10,6 +10,7 @@ All data lives on the device. None of it is in the repository.
 | Pending registrations | `data/registrations/<id>/n.jpg` (0700) | JPEG, re-encoded, at most 1600 px | Faces of people who registered | Rejected: deleted at once; unreviewed: 7 days; approved: moved into `gallery/` |
 | Registration records | `data/web.db` | sqlite3 | Invitation hashes, names, consent version and time, status | Kept (no retention rule set) |
 | Display names | `data/people.json` | JSON | Name for each opaque person key | Until the person is removed |
+| Camera setup | `data/cameras.json`, `data/cameras.active` (0600), `*.prev` | JSON, one text line | Camera choice, RTSP addresses with logins | Until changed on the Cameras page |
 | Gallery | `data/gallery.tsv` | One line per photo: name TAB 512 floats | Face embeddings | Rebuilt by `facepipe-enroll` |
 | Attendance events | `data/events-YYYY-MM-DD.jsonl` | JSON lines: time, ts, track, name, score (cosine), metric, l2, det, snap, frame, clip | Who was seen when | Forever (small) |
 | Face snapshots | `data/snaps/YYYY-MM-DD/HHMMSS_track.bmp` (older: .jpg) | 112x112 aligned faces | Faces of everyone seen, including unknowns | Forever (about 37 KB each) |
