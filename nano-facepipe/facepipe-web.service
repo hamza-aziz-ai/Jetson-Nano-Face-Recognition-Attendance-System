@@ -1,0 +1,15 @@
+[Unit]
+Description=facepipe attendance web page (port from facepipe.env)
+After=network-online.target
+RequiresMountsFor=/mnt/ssd
+
+[Service]
+User=hamza
+WorkingDirectory=/mnt/ssd/facepipe
+EnvironmentFile=/mnt/ssd/facepipe/facepipe.env
+ExecStart=/usr/bin/python3 /mnt/ssd/facepipe/web.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

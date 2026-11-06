@@ -1,0 +1,16 @@
+# secrets and site data: never commit
+nano-facepipe/web_auth
+nano-facepipe/rtsp_auth
+nano-facepipe/facepipe.env
+nano-facepipe/data/
+nano-facepipe/gallery/
+# build outputs and copied vendor config
+nano-facepipe/facepipe
+nano-facepipe/facepipe-enroll
+nano-facepipe/tracker.yml
+# models and engines (download/build per README)
+*.onnx
+*.plan
+*.engine
+__pycache__/
+*.pyc
