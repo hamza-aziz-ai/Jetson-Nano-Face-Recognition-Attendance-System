@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-07
+
+### Added
+
+- Sign-in page (owner: "Can we have an application login popup instead of this"): the browser's login pop-up is gone. Pages lead to `/login` and back; a signed session cookie lasts 12 hours, survives restarts and automatic updates, and ends at once when the password changes (`--set-password`). Sign out is in the header. Design agreed with Codex in a council (D-036).
+- Own "Page not found" page instead of plain text.
+
+### Changed
+
+- HTTP Basic login is no longer accepted (scripts sign in at `/login` and keep the cookie). Form tokens no longer expire when the website restarts.
+
 ## [1.7.2] - 2026-11-07
 
 ### Fixed
@@ -234,7 +245,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.7.2...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.2...v1.7.0

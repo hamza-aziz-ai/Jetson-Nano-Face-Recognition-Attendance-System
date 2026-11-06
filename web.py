@@ -2,7 +2,7 @@
 """Attendance web page for facepipe on the Jetson Nano. Python 3.6 standard library only; works fully offline.
 
 Reads $FACEPIPE_DATA/events-YYYY-MM-DD.jsonl and status.json (written by facepipe) and the enrolled gallery, and serves,
-behind HTTP Basic auth:
+behind a login page (/login, session cookie, D-036):
   /                 dashboard for today (or ?date=YYYY-MM-DD): present, absent, unknown faces, live status
   /csv?date=        attendance report as CSV (present and absent)
   /api/status       live status JSON (polled by the page)
@@ -16,7 +16,7 @@ Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000
                         FACEPIPE_LOGS; log: $FACEPIPE_LOGS/<year>/<Month>/web.log, rotated daily like facepipe.log)
 Self-check:  python3 web.py --selftest
 """
-import base64, cgi, csv, datetime, fcntl, glob, getpass, hashlib, hmac, html, io, json, os, re, secrets, shutil, socket, socketserver, sqlite3, string, subprocess, sys, threading, time
+import cgi, csv, datetime, fcntl, glob, getpass, hashlib, hmac, html, io, json, os, re, secrets, shutil, socket, socketserver, sqlite3, string, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -112,11 +112,17 @@ def set_password(user):
     pw = getpass.getpass("New password for %s: " % user)
     if len(pw) < 8 or pw != getpass.getpass("Again: "):
         sys.exit("passwords differ or shorter than 8 characters")
+    write_auth(AUTH_FILE, user, pw)
+    print("saved", AUTH_FILE, "- every open session ends now; log in again")
+
+
+def write_auth(path, user, pw):
+    """user:salt:hash, 0600, replaced in one step so the running website never reads half a file"""
     salt = os.urandom(16)
-    fd = os.open(AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write("%s:%s:%s\n" % (user, salt.hex(), hash_pw(pw, salt)))
-    print("saved", AUTH_FILE)
+    os.replace(path + ".tmp", path)
 
 
 def set_rtsp_password(user):
@@ -130,9 +136,25 @@ def set_rtsp_password(user):
     print("saved", RTSP_AUTH, "- restart facepipe to apply: sudo systemctl restart facepipe")
 
 
-def load_auth():
-    user, salt, digest = open(AUTH_FILE).read().strip().split(":")
+def load_auth(path):
+    user, salt, digest = open(path, encoding="utf-8").read().strip().split(":")
     return user, bytes.fromhex(salt), digest
+
+
+def session_key(path):
+    """32 random bytes in data/session.key (0600), made once: sessions and open forms survive restarts and updates.
+    Delete the file and restart the website to end every session (D-036)."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(os.urandom(32))
+    except FileExistsError:
+        pass
+    with open(path, "rb") as f:
+        key = f.read()
+    if len(key) != 32:
+        sys.exit("%s is damaged: delete it and start again (everyone logs in again)" % path)
+    return key
 
 
 # ---------- data ----------
@@ -226,6 +248,7 @@ ICONS = {  # 24x24 stroke icons for the sidebar (inline SVG: no files, no fonts)
     "system": "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"}
 PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
          ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("system", "/system", "System")]
+CSRF_MARK = "@@csrf@@"  # the layout's sign-out form; html_page puts the session's form token here
 CSP = ("default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 FLASH = {  # fixed messages only: the query string never reflects text into the page
@@ -999,9 +1022,30 @@ def reject(sid):
 SHOWN = {}  # one-time display of a new invitation link: nonce -> (link, expires)
 
 
-def public_page(title, body):
-    """pages for people without the admin login (registration): no navigation, no device status"""
-    return PUBLIC.substitute(title=esc(title), site=esc(SITE), body=body, version=esc(VERSION))
+def public_page(title, body, page="register", tag="Registration",
+                foot="Your photos stay on this device and are reviewed by the administrator."):
+    """pages without the admin session (registration, sign-in): no navigation, no device status"""
+    return PUBLIC.substitute(title=esc(title), site=esc(SITE), body=body, version=esc(VERSION), page=page, tag=esc(tag),
+                             foot=esc(foot))
+
+
+def page_not_found():
+    body = """<div class="nf"><p class="nf-code" aria-hidden="true">404</p><h1>Page not found</h1>
+<p class="sub">The address may be mistyped, or the page, evidence frame or clip was removed (recordings are kept for a limited time).</p>
+<p><a class="btn primary" href="/">Go to the dashboard</a></p></div>"""
+    return public_page("Page not found", body, "notfound", "Jetson Nano edge AI", "Recognition runs on this device; nothing leaves it.")
+
+
+def page_login(nxt, error=""):
+    body = """<h1>Sign in</h1><p class="sub">Administrator access to attendance, live view and device control.</p>
+<div class="flash bad"%s role="alert">%s</div>
+<section><form class="body form" method="post" action="/login">
+<input type="hidden" name="next" value="%s">
+<label class="field"><span>User name</span><input name="user" required maxlength="64" autocomplete="username" autofocus></label>
+<label class="field"><span>Password</span><input name="password" type="password" required maxlength="256" autocomplete="current-password"></label>
+<button class="btn primary submit" type="submit">Sign in</button>
+</form></section>""" % ("" if error else " hidden", esc(error), esc(nxt))
+    return public_page("Sign in", body, "login", "Administrator", "Recognition runs on this device; nothing leaves it.")
 
 
 def page_register(invite, token="", error="", name=""):
@@ -1360,11 +1404,12 @@ MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB 
 MAX_LIVE = 4          # concurrent MJPEG viewers
 FAIL_LIMIT, FAIL_WINDOW = 10, 900  # failed logins per client before refusing without hashing (PBKDF2 is costly)
 WEB_STARTED = int(time.time())
-SECRET = os.urandom(32)            # per process: CSRF tokens end with a restart, forms then ask to reload
-
-
-def csrf_token(user):
-    return hmac.new(SECRET, ("csrf:" + user).encode(), hashlib.sha256).hexdigest()
+SESSION_HOURS = 12
+COOKIE = "fp_session"
+TOKEN_RE = re.compile(r"^v1\.([0-9]{10})\.([0-9a-f]{64})$")
+PAGE_PATHS = ("/", "/live", "/attendance", "/people", "/cameras", "/system")  # where a sign-in may lead back to
+PROTECTED = ("/api/", "/live.mjpg", "/rec/", "/snap/", "/photo/", "/pending/", "/csv")  # 401 before sign-in, never 404
+NEXT_RE = re.compile(r"^/(live|attendance|people|cameras|system)?(\?[A-Za-z0-9=&_.:-]{0,200})?$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1381,26 +1426,62 @@ class Handler(BaseHTTPRequestHandler):
             return cf
         return ip
 
+    def https(self):
+        """the visitor used HTTPS: only the Cloudflare Tunnel (cloudflared on this host) says so, in X-Forwarded-Proto;
+        the same header from any other machine is ignored"""
+        return self.client_address[0] in ("127.0.0.1", "::1") and self.headers.get("X-Forwarded-Proto") == "https"
+
     def user(self):
-        """the logged-in user name, or None. Failed attempts are counted per client and throttled before hashing."""
-        h = self.headers.get("Authorization", "")
-        if not h.startswith("Basic "):
-            return None
+        """the signed-in user name from the session cookie, or None (D-036)"""
+        self.token = ""
+        for part in self.headers.get("Cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == COOKIE:
+                self.token = v
+        return self.server.session_user(self.token)
+
+    def csrf(self):
+        return self.server.sign("csrf:v1") or ""
+
+    def cookie(self, value, age):
+        return "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s" % (COOKIE, value, age, "; Secure" if self.https() else "")
+
+    def login_get(self, q):
+        nxt = q.get("next", ["/"])[0]
+        nxt = nxt if NEXT_RE.match(nxt) else "/"
+        if self.user():
+            return self.redirect(nxt)
+        self.html_page(page_login(nxt))
+
+    def login_post(self):
+        """public: user name and password; refused from other sites, throttled per visitor before the costly hash"""
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_BODY:
+            return self.send(413, "Too large", "text/plain; charset=utf-8")
+        form = parse_qs(self.rfile.read(n).decode(errors="replace"))
+        get = lambda k: form.get(k, [""])[0]
+        nxt = get("next") if NEXT_RE.match(get("next")) else "/"
         ip, now = self.client_ip(), time.time()
         fails = [t for t in self.server.fails.get(ip, []) if now - t < FAIL_WINDOW]
+        page = lambda code, msg: self.send(code, page_login(nxt, msg), extra={"Content-Security-Policy": CSP})
+        if not self.same_origin():
+            LOG.write("WARNING", "sign-in refused from %s (origin)" % ip)
+            return page(403, "The form was refused; open the sign-in page again.")
         if len(fails) >= FAIL_LIMIT:
-            return None
-        try:
-            user, pw = base64.b64decode(h[6:]).decode().split(":", 1)
-        except Exception:
-            user, pw = "", ""
-        u, salt, digest = self.server.auth
-        if hmac.compare_digest(user, u) & hmac.compare_digest(hash_pw(pw, salt), digest):
-            return u
-        fails.append(now)
-        self.server.fails[ip] = fails
-        LOG.write("WARNING", "login failed from %s for %s" % (ip, self.path[:80]))
-        return None
+            return page(429, "Too many failed attempts; try again in 15 minutes.")
+        c = self.server.creds()
+        if not c:
+            return page(503, "No login is set on this device.")
+        u, salt, digest = c
+        if hmac.compare_digest(get("user").encode(), u.encode()) & \
+                hmac.compare_digest(hash_pw(get("password"), salt).encode(), digest.encode()):
+            self.server.fails.pop(ip, None)
+            LOG.write("INFO", "signed in from %s" % ip)
+            exp = int(now) + SESSION_HOURS * 3600
+            return self.redirect(nxt, {"Set-Cookie": self.cookie(self.server.session_token(exp), SESSION_HOURS * 3600)})
+        self.server.fails[ip] = fails + [now]
+        LOG.write("WARNING", "sign-in failed from %s" % ip)
+        return page(401, "Wrong user name or password.")
 
     def headers_common(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1423,13 +1504,18 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def html_page(self, body):
+        if CSRF_MARK in body:  # the layout's sign-out form
+            body = body.replace(CSRF_MARK, self.csrf())
         self.send(200, body, extra={"Content-Security-Policy": CSP})
 
-    def redirect(self, where):
+    def redirect(self, where, extra=None):
         self.send_response(303)
         self.send_header("Location", where)
         self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
         self.headers_common()
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
 
     def file(self, path, ctype=None, cache="private, max-age=86400"):
@@ -1482,6 +1568,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 now = time.time()
                 if now - tick > 3:
+                    if not self.server.session_user(self.token):  # session expired, or the password changed
+                        break
                     open(want, "a").close()
                     os.utime(want)
                     tick = now
@@ -1503,14 +1591,22 @@ class Handler(BaseHTTPRequestHandler):
             self.server.live_slots.release()
 
     def same_origin(self):
-        """POST guard: the browser's Origin (or Referer) must name this host; other sites cannot post here"""
+        """POST guard: the browser's Origin (or Referer) must be this site, scheme included; other sites cannot post here"""
         host = self.headers.get("Host", "")
-        src = self.headers.get("Origin") or self.headers.get("Referer") or ""
-        return bool(host) and urlparse(src).netloc == host
+        u = urlparse(self.headers.get("Origin") or self.headers.get("Referer") or "")
+        return bool(host) and "%s://%s" % (u.scheme, u.netloc) == "%s://%s" % ("https" if self.https() else "http", host)
 
-    def login_required(self):
-        return self.send(401, "Login required", "text/plain; charset=utf-8",
-                         {"WWW-Authenticate": 'Basic realm="%s", charset="UTF-8"' % SITE})
+    def login_required(self, url):
+        """pages go to the sign-in page and come back after it; data, video and files get a plain 401 (no browser pop-up)"""
+        if url.path in PAGE_PATHS:
+            nxt = url.path + ("?" + url.query if url.query else "")
+            return self.redirect("/login?next=" + quote(nxt if NEXT_RE.match(nxt) else "/", safe=""))
+        if url.path.startswith(PROTECTED):  # whether a file exists is not told before sign-in
+            return self.send(401, "Login required", "text/plain; charset=utf-8")
+        return self.not_found()
+
+    def not_found(self):
+        self.send(404, page_not_found(), extra={"Content-Security-Policy": CSP})
 
     def do_HEAD(self):
         self.do_GET()
@@ -1525,9 +1621,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.html_page(page_register(valid_invite(t), t))
         if url.path == "/register/done":
             return self.html_page(page_register_done())
+        if url.path == "/login":
+            return self.login_get(q)
         user = self.user()
         if not user:
-            return self.login_required()
+            return self.login_required(url)
         if url.path == "/":
             return self.html_page(page_overview())
         if url.path == "/live":
@@ -1547,14 +1645,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.html_page(page_attendance(day, today))
         if url.path == "/people":
             host = self.headers.get("Host") or "this-device"
-            return self.html_page(page_people(csrf_token(user), host, q.get("show", [""])[0], q.get("msg", [""])[0]))
+            return self.html_page(page_people(self.csrf(), host, q.get("show", [""])[0], q.get("msg", [""])[0]))
         m = re.match(r"^/pending/([0-9a-f]{12})/([1-5])\.jpg$", url.path)
         if m and os.path.exists(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg")):
             return self.file(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg"), cache="no-store")
         if url.path == "/cameras":
-            return self.html_page(page_cameras(csrf_token(user), q.get("msg", [""])[0]))
+            return self.html_page(page_cameras(self.csrf(), q.get("msg", [""])[0]))
         if url.path == "/system":
-            return self.html_page(page_system(csrf_token(user), q.get("msg", [""])[0]))
+            return self.html_page(page_system(self.csrf(), q.get("msg", [""])[0]))
         if url.path == "/live.mjpg":
             return self.live()
         if url.path == "/api/health":  # the panel's markup, so the page needs no template of its own
@@ -1573,7 +1671,7 @@ class Handler(BaseHTTPRequestHandler):
             path = first_photo(unquote(url.path[7:]))
             if path:
                 return self.file(path)
-        self.send(404, "Not found", "text/plain; charset=utf-8")
+        self.not_found()
 
     def register_post(self):
         """public: name, photos and consent for a valid invitation"""
@@ -1615,19 +1713,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if urlparse(self.path).path == "/register":
             return self.register_post()
+        if urlparse(self.path).path == "/login":
+            return self.login_post()
         user = self.user()
         if not user:
-            return self.login_required()
+            return self.send(401, "Login required", "text/plain; charset=utf-8")
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
             return self.send(413, "Too large", "text/plain; charset=utf-8")
         form = parse_qs(self.rfile.read(n).decode(errors="replace"))
         token = form.get("csrf", [""])[0]
-        if not self.same_origin() or not hmac.compare_digest(token, csrf_token(user)):
+        if not self.same_origin() or not hmac.compare_digest(token.encode(errors="replace"), self.csrf().encode()):
             LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_ip()))
             back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras") else "system")
             return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
+        if path == "/logout":
+            LOG.write("INFO", "signed out from %s" % self.client_ip())
+            return self.redirect("/login", {"Set-Cookie": self.cookie("", 0)})
         if path == "/system/matching":
             with _enroll_lock:
                 return self.redirect("/system?msg=" + save_matching(form))
@@ -1656,7 +1759,7 @@ class Handler(BaseHTTPRequestHandler):
             with _enroll_lock:  # one change at a time
                 msg, test = camera_post(path, form)
             if test:  # the test result is shown on the page itself, without a redirect
-                return self.html_page(page_cameras(csrf_token(user), msg, test))
+                return self.html_page(page_cameras(self.csrf(), msg, test))
             return self.redirect("/cameras?msg=" + msg)
         if path == "/people/remove":
             person = form.get("person", [""])[0]
@@ -1681,6 +1784,39 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
         self.live_slots = threading.BoundedSemaphore(MAX_LIVE)
         self.fails = {}
         self.reg_hits = {}
+        self.auth_file, self._auth, self._auth_sig = AUTH_FILE, None, None
+        os.makedirs(DATA, exist_ok=True)
+        self.key = session_key(os.path.join(DATA, "session.key"))
+
+    def creds(self):
+        """(user, salt, hash) from web_auth, read again whenever the file changes, so --set-password takes effect at once
+        and ends every session; None when it is missing or damaged (nobody gets in)"""
+        try:
+            st = os.stat(self.auth_file)
+            sig = (st.st_ino, st.st_mtime_ns, st.st_size)
+            if sig != self._auth_sig:
+                self._auth, self._auth_sig = load_auth(self.auth_file), sig
+            return self._auth
+        except (OSError, ValueError):
+            return None
+
+    def sign(self, purpose, *parts):
+        """HMAC over a purpose, its parts and the current password hash: a new password ends sessions and open forms"""
+        c = self.creds()
+        if not c:
+            return None
+        return hmac.new(self.key, "|".join((purpose,) + parts + (c[2],)).encode(), hashlib.sha256).hexdigest()
+
+    def session_token(self, exp):
+        return "v1.%d.%s" % (exp, self.sign("session:v1", str(exp)))
+
+    def session_user(self, token):
+        """the user name for a valid, unexpired session token, else None"""
+        m = TOKEN_RE.match(token or "")
+        if not m or not time.time() < int(m.group(1)) <= time.time() + SESSION_HOURS * 3600:
+            return None
+        mac = self.sign("session:v1", m.group(1))
+        return self.creds()[0] if mac and hmac.compare_digest(mac.encode(), m.group(2).encode()) else None
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):  # bounded threads: refuse instead of growing without limit
@@ -1747,7 +1883,6 @@ def selftest_checks():
     salt = b"x" * 16
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
     assert service_action("rm -rf") == "denied" and camera_label() in camera_label()
-    assert csrf_token("a") == csrf_token("a") != csrf_token("b")
     assert save_matching({"metric": ["l2"], "cosine": ["0.5"], "l2": ["2.0"]}) == "match_bad"  # out of range: nothing written
     assert not os.path.exists(MATCH_CONF) and "Cosine similarity" in matching_html("t")
     h = device_health()  # whatever this machine exposes; the panel must render either way
@@ -1765,30 +1900,34 @@ def selftest_http():
         f.write(json.dumps({"time": day + "T13:05:00", "ts": 1, "name": "<script>x</script>", "score": 0.7,
                             "snap": "%s/130500_1.bmp" % day}) + chr(10))
     srv = Server(("127.0.0.1", 0), Handler)
-    salt = b"s" * 16
-    srv.auth = ("admin", salt, hash_pw("secret123", salt))
+    srv.auth_file = os.path.join(DATA, "selftest-auth")
+    write_auth(srv.auth_file, "admin", "secret123")
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = "http://127.0.0.1:%d" % srv.server_address[1]
-    good = "Basic " + base64.b64encode(b"admin:secret123").decode()
+    host = "127.0.0.1:%d" % srv.server_address[1]
+    good = None  # the session cookie, after signing in below
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *a, **kw):
             return None  # report the 303 itself
     opener = urllib.request.build_opener(NoRedirect)
 
-    def get(path, auth=good, headers=None, data=None):
+    def get(path, auth="", headers=None, data=None):
         h = dict(headers or {})
-        if auth:
-            h["Authorization"] = auth
+        if auth or (auth == "" and good):
+            h["Cookie"] = auth or good
         req = urllib.request.Request(base + path, data=data, headers=h)
         try:
             r = opener.open(req, timeout=10)
             return r.status, dict(r.headers), r.read()
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers), e.read()
-    assert get("/", auth=None)[0] == 401
-    assert get("/", auth="Basic " + base64.b64encode(b"admin:wrong").decode())[0] == 401
-    assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 401
+    good = selftest_login(srv, get, host)
+    assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 404
+    code, hd, body = get("/no-such-page", auth=None)
+    assert code == 404 and b"Page not found" in body and "script-src 'self'" in hd["Content-Security-Policy"]
+    assert get("/no-such-page")[0] == 404 and get("/rec/2026-11-06/000000_clip.mp4", auth=None)[0] == 401
+    assert get("/rec/2026-11-06/000000_clip.mp4")[0] == 404
     for p in ("/", "/live", "/attendance", "/attendance?date=" + day, "/people", "/system"):
         code, hd, body = get(p)
         assert code == 200 and "script-src 'self'" in hd.get("Content-Security-Policy", ""), (p, code)
@@ -1799,8 +1938,7 @@ def selftest_http():
     assert get("/attendance?date=2026-02-30")[0] == 400 and get("/csv?date=../x")[0] == 400
     code, hd, body = get("/static/app.js", headers={"Range": "bytes=0-9"})
     assert code == 206 and len(body) == 10 and hd["Content-Range"].startswith("bytes 0-9/")
-    host = "127.0.0.1:%d" % srv.server_address[1]
-    form = ("csrf=%s&action=nothing" % csrf_token("admin")).encode()
+    form = ("csrf=%s&action=nothing" % srv.sign("csrf:v1")).encode()
     # no Origin: refused; wrong token: refused; right token and origin, unknown action: refused by the whitelist
     assert get("/")[1].get("Referrer-Policy") == "same-origin"  # under no-referrer Chrome posts "Origin: null"
     for hd, d in (({}, form), ({"Origin": "http://" + host}, b"csrf=bad&action=start"), ({"Origin": "null"}, form),
@@ -1809,11 +1947,59 @@ def selftest_http():
         assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))
     assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
     selftest_registration(get, host)
-    selftest_cameras(get, host)
+    selftest_cameras(get, host, srv.sign("csrf:v1"))
     srv.shutdown()
+    os.remove(srv.auth_file)
 
 
-def selftest_cameras(get, host):
+def selftest_login(srv, get, host):
+    """sign-in page, session cookie, tampering, expiry, redirects, sign-out, password change (D-036); returns a cookie"""
+    o = {"Origin": "http://" + host}
+    code, h, _ = get("/", auth=None)
+    assert code == 303 and h["Location"] == "/login?next=%2F" and "WWW-Authenticate" not in h, (code, h)
+    code, h, _ = get("/api/status", auth=None)
+    assert code == 401 and "WWW-Authenticate" not in h and get("/live.mjpg", auth=None)[0] == 401
+    assert b"autocomplete=\"current-password\"" in get("/login", auth=None)[2]
+
+    def login(user, pw, nxt="/", headers=o):
+        return get("/login", auth=None, headers=headers, data=("user=%s&password=%s&next=%s" % (
+            quote(user), quote(pw), quote(nxt, safe=""))).encode())
+    assert login("admin", "wrong")[0] == 401 and login("\u00e9\u4e2d", "\u00e9\u4e2d")[0] == 401  # non-ASCII: no exception
+    assert login("admin", "secret123", headers={})[0] == 403 and login("admin", "secret123", headers={"Origin": "null"})[0] == 403
+    # X-Forwarded-Proto counts only from this host: here it is, so the origin must then be https
+    assert login("admin", "secret123", headers=dict(o, **{"X-Forwarded-Proto": "https"}))[0] == 403
+    code, h, _ = login("admin", "secret123", headers={"Origin": "https://" + host, "X-Forwarded-Proto": "https"})
+    assert code == 303 and "; Secure" in h["Set-Cookie"]
+    for bad in ("//evil.example", "/\\evil.example", "https://evil.example", "/live\r\nX: y"):
+        code, h, _ = login("admin", "secret123", bad)
+        assert code == 303 and h["Location"] == "/", (bad, h["Location"])
+    code, h, _ = login("admin", "secret123", "/attendance?date=2026-11-06")
+    assert code == 303 and h["Location"] == "/attendance?date=2026-11-06" and "; Secure" not in h["Set-Cookie"]
+    assert "HttpOnly" in h["Set-Cookie"] and "SameSite=Lax" in h["Set-Cookie"] and "Domain" not in h["Set-Cookie"]
+    cookie = h["Set-Cookie"].split(";")[0]
+    tok = cookie.split("=", 1)[1]
+    assert get("/", auth=cookie)[0] == 200 and srv.session_user(tok) == "admin"
+    assert get("/login", auth=cookie)[0] == 303  # signed in already
+    exp = int(time.time()) - 1  # expired, tampered, malformed, too far ahead: all signed out
+    for t in (srv.session_token(exp), tok[:-1] + ("0" if tok[-1] != "0" else "1"), "v1.x.y", "\u00e9" * 50,
+              srv.session_token(int(time.time()) + SESSION_HOURS * 3600 + 60)):
+        assert get("/", auth=COOKIE + "=" + t)[0] == 303, t
+    other = Server(("127.0.0.1", 0), Handler)  # a restart reads the same key: still signed in
+    other.auth_file = srv.auth_file
+    assert other.session_user(tok) == "admin" and other.sign("csrf:v1") == srv.sign("csrf:v1")
+    other.server_close()
+    form = ("csrf=%s" % srv.sign("csrf:v1")).encode()
+    code, h, _ = get("/logout", auth=cookie, headers=o, data=form)
+    assert code == 303 and h["Location"] == "/login" and "Max-Age=0" in h["Set-Cookie"]
+    old_csrf = srv.sign("csrf:v1")
+    write_auth(srv.auth_file, "admin", "secret123")  # a new password (same text, new salt) ends sessions and forms
+    assert get("/", auth=cookie)[0] == 303 and srv.sign("csrf:v1") != old_csrf
+    fresh = login("admin", "secret123")[1]["Set-Cookie"].split(";")[0]
+    assert get("/", auth=fresh)[0] == 200
+    return fresh
+
+
+def selftest_cameras(get, host, tok):
     """passwords never reach a page; add, enable, remove a network camera while a CSI camera is in use (no restarts)"""
     assert masked("rtsp://admin:s3cret@cam:554/s") == "rtsp://admin:\u2022\u2022\u2022@cam:554/s" and masked("rtsp://cam/s") == "rtsp://cam/s"
     assert with_login("rtsp://cam:554/s", "u", "p@ss:1") == "rtsp://u:p%40ss%3A1@cam:554/s"
@@ -1822,7 +2008,6 @@ def selftest_cameras(get, host):
         if os.path.exists(p):
             os.remove(p)
     write_private(CAM_JSON, json.dumps({"source": "csi", "csi": "0", "usb": "/dev/video1", "size": "1920x1080", "rtsp": []}))
-    tok = csrf_token("admin")
     hd = {"Origin": "http://" + host}
     code, h, _ = get("/cameras/add", headers=hd, data=("csrf=%s&name=Gate&url=rtsp%%3A%%2F%%2Fcam%%3A554%%2Fs&user=admin&pw=topsecret" % tok).encode())
     assert code == 303 and h["Location"] == "/cameras?msg=cam_added", (code, h.get("Location"))
@@ -1915,6 +2100,5 @@ if __name__ == "__main__":
         if not os.path.exists(AUTH_FILE):
             sys.exit("no login set: run  python3 %s --set-password <user>" % sys.argv[0])
         srv = Server(("0.0.0.0", PORT), Handler)
-        srv.auth = load_auth()
         LOG.write("INFO", "web %s: attendance page on port %d, data %s" % (VERSION, PORT, DATA))
         srv.serve_forever()

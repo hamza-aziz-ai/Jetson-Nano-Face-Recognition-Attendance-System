@@ -142,3 +142,10 @@ v1.7.0 check on the Nano (2026-11-07):
 | --- | --- | --- |
 | Matching file | test instance with `metric=l2`, `l2=0.90` in `matching.conf` | startup log: "match L2 <= 0.90" |
 | Out-of-range value | `python3 web.py --selftest` | L2 2.0 refused, nothing written; selftest ok |
+
+v1.8.0 check on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Sign-in, cookie, tampering, expiry, redirects, sign-out, new password, restart | `python3 web.py --selftest` | selftest ok |
+| Real pages | test instance on port 8099 with a generated test login | `/` 303 to `/login?next=%2F`; `/login` 200; `/nope` 404 page; sign-in 303 to `/system` with `HttpOnly; SameSite=Lax`; `/system` 200 with Sign out and its form token |

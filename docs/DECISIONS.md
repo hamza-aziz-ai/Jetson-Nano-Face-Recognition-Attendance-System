@@ -349,3 +349,17 @@ Chosen: 4 (owner: hostname `attendance.hamzaaziz.dev`, Access in front, cloudfla
 Why: the owner wants to see who came and went, and the device's health, from anywhere, and to stop recognition remotely if something goes wrong. A tunnel opens no inbound port. The site holds faces and attendance of a household, so Access (the owner's email) stands in front of the site's own login; `/register*` and `/static/*` bypass Access because invitation links are for people without an account and still need a valid single-use invitation.
 Trade-off: Faces viewed remotely pass through Cloudflare (TLS ends at its edge); the device needs internet for remote access; a Cloudflare outage cuts remote access, not the home network.
 Revisit if: the site must be reachable without Cloudflare, or more administrators need access.
+
+## D-036: Sign-in page with a signed session cookie instead of HTTP Basic (owner, with Codex (council))
+Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council, agreed after 3 exchanges).
+Options:
+
+1. Keep HTTP Basic (browser pop-up)
+2. Sign-in page with server-side sessions (a table of random ids)
+3. Sign-in page with a stateless signed cookie
+
+Chosen: 3. Token `v1.<expiry>.<HMAC-SHA256>` over a purpose label, the expiry and the current password hash, keyed by 32 random bytes in `data/session.key` (0600, created once; damaged = the website refuses to start). Absolute 12 h; cookie `fp_session`, host-only, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when the visitor used HTTPS (only `X-Forwarded-Proto` from cloudflared on this host counts). `web_auth` is read again when it changes and written atomically, so a new password ends every session and open form. Form tokens use the same key with their own label, so they survive restarts. Basic is no longer accepted (browsers resend cached Basic credentials, which would defeat sign-out). POSTs, the sign-in included, need the browser's Origin (or Referer) to equal this site, scheme included. After sign-in only known page paths are followed (`next`). Pages redirect to the sign-in; data, video and files answer 401 without a challenge; the live stream closes when the session ends.
+Why: the owner asked for the site's own sign-in instead of the browser pop-up, and for a sign-out. Codex found that "starts with /" let `/\evil.example` redirect away, that the cached password hash made "a new password ends sessions" untrue, and that `CF-Connecting-IP` says nothing about HTTPS.
+Rejected: a Host allowlist (the cookie is host-only and forms carry an unguessable token; it would also put host names into the repository); a separate pre-sign-in form token (one account, so a forced sign-in gains an attacker nothing).
+Trade-off: Sign-out clears the cookie but cannot revoke a stolen token before it expires (12 h); delete `data/session.key` and restart the website to end every session. On the home network the site is plain HTTP, so the password and cookie cross the LAN in clear (as with Basic).
+Revisit if: more than one account is needed, or sessions must be revocable one by one.

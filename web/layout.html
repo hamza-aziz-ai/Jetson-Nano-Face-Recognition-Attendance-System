@@ -20,6 +20,7 @@
   <button class="menu-btn" id="menubtn" type="button" aria-controls="side" aria-expanded="false" aria-label="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   <span class="crumb">$site <span aria-hidden="true">/</span> <b>$title</b></span>
   <span id="status" class="pill $state" role="status" aria-live="polite">$detail</span>
+  <form method="post" action="/logout" class="signout"><input type="hidden" name="csrf" value="@@csrf@@"><button class="btn" type="submit">Sign out</button></form>
  </header>
  <main id="main">
 $flash

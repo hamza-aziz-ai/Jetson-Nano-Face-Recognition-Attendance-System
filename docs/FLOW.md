@@ -88,9 +88,9 @@ sequenceDiagram
   participant D as data/ and /mnt/rec
   participant S as /dev/shm/facepipe
   participant F as facepipe
-  B->>W: GET / with Basic auth
-  alt no or wrong login
-    W-->>B: 401
+  B->>W: GET / with the session cookie
+  alt no or expired session
+    W-->>B: 303 to /login (sign-in sets the cookie)
   else login ok
     W->>D: read events-YYYY-MM-DD.jsonl, gallery.tsv, status.json
     W-->>B: page with present, absent, unknown, status
@@ -105,10 +105,10 @@ sequenceDiagram
   W-->>B: live, waiting for the camera, or stopped
 ```
 
-Key: `Handler.do_GET`, `Handler.authorized`, `page`, `attendance`, `Handler.live`, `status` (`web.py`); `on_jpeg` (`facepipe.cpp`).
+Key: `Handler.do_GET`, `Handler.user`, `Server.session_user`, `page`, `attendance`, `Handler.live`, `status` (`web.py`); `on_jpeg` (`facepipe.cpp`).
 
-1. Every request carries HTTP Basic auth, checked against the PBKDF2 hash in `web_auth`.
-2. Without a valid login the answer is 401.
+1. Every request carries the session cookie set by `/login` after the PBKDF2 check against `web_auth` (D-036).
+2. Without a valid session a page redirects to `/login`; data, video and files answer 401.
 3. With a login the page reads the day's events, the gallery and the status file.
 4. The page shows present, absent and unknown people and the status badge.
 5. Opening the live view requests the MJPEG stream.
