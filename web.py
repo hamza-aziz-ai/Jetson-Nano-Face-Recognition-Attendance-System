@@ -307,7 +307,7 @@ def page_live(host):
     body = """<h1>Live</h1><p class="sub">The camera with recognition overlay: amber while recognizing, green with the name, red for unknown.</p>
 <section aria-labelledby="h-live"><div class="sh"><h2 id="h-live">Camera</h2><span class="count">annotated on the device</span>
  <span class="end"><button class="btn" id="livebtn" type="button">Pause</button></span></div>
-<img id="liveimg" class="video" alt="Live camera view with face boxes and names">%s</section>""" % rtsp
+<div class="stage" role="img" aria-label="Live camera view with face boxes and names"><img id="liveimg" class="video" alt=""><canvas id="livefrozen" class="video" hidden></canvas><span id="livetag" class="tag" hidden>Paused</span></div>%s</section>""" % rtsp
     return layout("live", "Live", body)
 
 
@@ -422,13 +422,14 @@ def page_system(csrf, flash):
     upd = tail(os.path.join(logdir, "update.log"), 3)
 
     def button(action, label, cls, confirm):
-        return ("<form method='post' action='/system/service' data-confirm='%s'><input type='hidden' name='csrf' value='%s'>"
+        return ("<form method='post' action='/system/service' data-confirm='%s' data-title='%s the recognition service?' "
+                "data-ok='%s' data-kind='%s'><input type='hidden' name='csrf' value='%s'>"
                 "<input type='hidden' name='action' value='%s'><button class='btn %s' type='submit'>%s</button></form>"
-                % (esc(confirm), csrf, action, cls, label))
+                % (esc(confirm), label, label, "danger" if cls == "danger" else "primary", csrf, action, cls, label))
     buttons = "".join([
-        button("start", "Start", "primary", "Start the recognition service?") if active != "active" else "",
-        button("restart", "Restart", "", "Restart the recognition service? Video stops for a few seconds.") if active == "active" else "",
-        button("stop", "Stop", "danger", "Stop the recognition service? No attendance is recorded until it is started again.")
+        button("start", "Start", "primary", "Recognition and attendance recording begin again.") if active != "active" else "",
+        button("restart", "Restart", "", "Video and recognition stop for a few seconds, then start again.") if active == "active" else "",
+        button("stop", "Stop", "danger", "No attendance is recorded until it is started again. It stays stopped across updates.")
         if active == "active" else ""])
     body = """<h1>System</h1><p class="sub">Service control, device status and recent log lines.</p>
 <section aria-labelledby="h-svc"><div class="sh"><h2 id="h-svc">Recognition service</h2><span class="pill %s">%s</span></div>
@@ -559,7 +560,9 @@ class Handler(BaseHTTPRequestHandler):
     def headers_common(self):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        # same-origin, not no-referrer: under no-referrer Chrome sends "Origin: null" on form posts and the same-origin
+        # check refused the owner's own clicks; same-origin still sends nothing to other sites
+        self.send_header("Referrer-Policy", "same-origin")
 
     def send(self, code, body, ctype="text/html; charset=utf-8", extra=None, cache="no-store"):
         body = body if isinstance(body, bytes) else body.encode()
@@ -850,7 +853,8 @@ def selftest_http():
     host = "127.0.0.1:%d" % srv.server_address[1]
     form = ("csrf=%s&action=nothing" % csrf_token("admin")).encode()
     # no Origin: refused; wrong token: refused; right token and origin, unknown action: refused by the whitelist
-    for hd, d in (({}, form), ({"Origin": "http://" + host}, b"csrf=bad&action=start"),
+    assert get("/")[1].get("Referrer-Policy") == "same-origin"  # under no-referrer Chrome posts "Origin: null"
+    for hd, d in (({}, form), ({"Origin": "http://" + host}, b"csrf=bad&action=start"), ({"Origin": "null"}, form),
                   ({"Origin": "http://evil.example"}, form), ({"Origin": "http://" + host}, form)):
         code, h2, _ = get("/system/service", headers=hd, data=d)
         assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))

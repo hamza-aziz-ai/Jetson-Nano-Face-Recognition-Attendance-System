@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-07
+
+### Fixed
+
+- Start, Stop and Restart were refused as "expired form or another site": under `Referrer-Policy: no-referrer` Chrome posts `Origin: null`. Pages now use `same-origin` (docs/bugs/web-actions-refused.md).
+- Pausing the live view left a broken image; it now keeps the last frame, labelled Paused.
+
+### Changed
+
+- Confirmations use the site's own dialog instead of the browser's pop-up.
+
 ## [1.2.0] - 2026-11-07
 
 ### Added
@@ -137,7 +148,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.0...v1.1.1
