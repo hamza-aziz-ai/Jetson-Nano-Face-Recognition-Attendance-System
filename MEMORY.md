@@ -34,9 +34,9 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 - People page: cards were cramped (fixed in v1.4.1); generally tighten spacing, typography and button styles across pages.
 - Footer says "no data leaves this device": must change if remote access through Cloudflare is added.
 
-## Open question to the owner (2026-11-07)
+## Remote access (D-035), 2026-11-07
 
-- Remote access over the internet through a Cloudflare Tunnel (home use). Proposed: Cloudflare Access in front (email code or Google login), `/register` bypass or registration only at home, the site to take the visitor address from `CF-Connecting-IP` only for tunnel requests (otherwise one person's failed logins lock everyone out), README/THREAT to say faces pass through Cloudflare when viewed remotely. Needs: the owner's domain on Cloudflare, the owner runs `cloudflared tunnel login`, approval of the cloudflared service.
+- Owner chose `attendance.hamzaaziz.dev`, Cloudflare Access in front, approved the cloudflared download. cloudflared 2026.10.7 (`.deb`, SHA-256 checked) and `/etc/systemd/system/cloudflared-facepipe.service` are installed on the Nano, disabled until the owner puts the token in `/etc/cloudflared/facepipe-tunnel.env` (0600) and enables it. Owner steps: docs/REMOTE-ACCESS.md. Never read or print the token.
 
 ## Next (owner's request of 2026-11-06, in order)
 

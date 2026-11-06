@@ -192,6 +192,10 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 - **Automatic updates.** New releases install themselves within 10 minutes, with health check and rollback; a failed release is never retried and the version never goes backwards (D-031).
 - **Storage.** The recordings volume drops its oldest week when 90% full; recording turns itself off when the volume is missing.
 
+## Remote access
+
+Optional: a Cloudflare Tunnel publishes the website at a hostname over HTTPS without opening any router port, with Cloudflare Access in front so only the owner gets to the login page (D-035). Setup, five steps in the Cloudflare dashboard and on the Nano: [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md).
+
 ## Security and privacy
 
 - Biometric data (photos, embeddings, snapshots, recordings) stays on the device.
@@ -320,6 +324,7 @@ Every bug has a write-up in [docs/bugs/](docs/bugs/).
 | `deploy/install.sh` | One-step install: build, engines, self-tests, `facepipe.env`, services and update timer for the current user and folder |
 | `deploy/deploy.sh`, `deploy/update.sh` | Release deploy with health check and rollback; the automatic update check |
 | `deploy/*.in` | systemd unit templates (filled in by `install.sh`) |
+| `deploy/cloudflared-facepipe.service` | Optional Cloudflare Tunnel service for remote access (docs/REMOTE-ACCESS.md) |
 | `tools/reshape_scrfd.py` | Makes the 640x384 SCRFD model from the InsightFace-REST model zoo file |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
 | `Makefile` | Builds both binaries; `make check` compiles without linking (CI) |

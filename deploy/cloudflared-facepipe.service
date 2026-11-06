@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for the facepipe website (remote access, D-035)
+Wants=network-online.target
+After=network-online.target facepipe-web.service
+
+[Service]
+# remotely managed tunnel: the owner creates it in the Cloudflare dashboard and puts its token in this root-only file
+# (TUNNEL_TOKEN=...); the token never goes into the repository, a command line or a chat
+EnvironmentFile=/etc/cloudflared/facepipe-tunnel.env
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run
+DynamicUser=yes
+# no logs: request URLs can carry registration invitation tokens
+StandardOutput=null
+StandardError=null
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

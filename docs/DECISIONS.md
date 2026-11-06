@@ -335,3 +335,16 @@ Owner's answers of 2026-11-07, refining D-033:
 
 Why: owner decisions (exposure, retention, personal data, product scope). RTSP camera addresses contain logins, so they stay in a mode-0600 file on the device and the website never shows the password part.
 Revisit if: a site needs a USB or CSI camera together with a network camera.
+
+## D-035: Remote access through a Cloudflare Tunnel with Cloudflare Access (owner)
+Options:
+
+1. Home network only
+2. Port forwarding on the router with a certificate on the Nano
+3. Cloudflare Tunnel, site login only
+4. Cloudflare Tunnel with Cloudflare Access in front
+
+Chosen: 4 (owner: hostname `attendance.hamzaaziz.dev`, Access in front, cloudflared download approved). Practice taken from the owner's Medical-ChatBot and HalalLens projects: remotely managed tunnel created by the owner, token only in a private file, pinned cloudflared without auto-update, no cloudflared logs, the public hostname added last. Adapted to the Nano: no Docker, so the official arm64 `.deb` and a systemd service with `DynamicUser=yes` (`deploy/cloudflared-facepipe.service`); the visitor address comes from `CF-Connecting-IP`, trusted only on connections from this host.
+Why: the owner wants to see who came and went, and the device's health, from anywhere, and to stop recognition remotely if something goes wrong. A tunnel opens no inbound port. The site holds faces and attendance of a household, so Access (the owner's email) stands in front of the site's own login; `/register*` and `/static/*` bypass Access because invitation links are for people without an account and still need a valid single-use invitation.
+Trade-off: Faces viewed remotely pass through Cloudflare (TLS ends at its edge); the device needs internet for remote access; a Cloudflare outage cuts remote access, not the home network.
+Revisit if: the site must be reachable without Cloudflare, or more administrators need access.
