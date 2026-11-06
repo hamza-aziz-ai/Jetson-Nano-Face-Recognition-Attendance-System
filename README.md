@@ -36,7 +36,7 @@ It is built as a native C++ DeepStream application with custom TensorRT post-pro
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
   SRC["`**Source**: RTSP or file (NVDEC), CSI (Argus ISP), USB (NVJPG decode)`"] --> DROP["`keep every Nth frame`"]
   DROP --> MUX["`nvstreammux`"] --> DET["`nvinfer: SCRFD-10G 640x384, raw tensors`"]
   DET --> P1["`probe: decode boxes and landmarks`"] --> TRK["`nvtracker (IOU)`"]
