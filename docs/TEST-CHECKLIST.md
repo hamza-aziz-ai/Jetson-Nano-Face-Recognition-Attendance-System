@@ -68,3 +68,9 @@ v1.1.0 checks on the Nano (2026-11-06):
 | Self-tests (detection policy: every frame within 10 s of a face, every 6th after, back at once, off with 0) | `./facepipe --selftest` | ok (counts collected outside `assert`, so cppcheck sees no side effects in it) |
 | Same results as nvinfer | gallery photos as a 17 s 1080p video, run through v1.0.3 and v1.1.0 (`FACEPIPE_IDLE_AFTER=0`), stdout JSON compared | same frame, same box [786, 266, 1172, 744], embedding cosine 1.0000, both `hamza_aziz` 0.979 |
 | Empty scene, CSI camera | live service, `tegrastats`, `status.json` | 15.0 fps, `det_fps` 2.4-2.6, GPU 0% in the samples, CPU about 20% per core |
+
+v1.1.2 check on the Nano (2026-11-06):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Clip pre-roll | 26 s test video (8 s empty, 10 s face, 8 s empty) through a test instance with `GST_DEBUG=h264parse:2` | before: buffer 3.2 s, clip 0.23 s, parser drops every frame; after `idrinterval=15`: clip 8.2 s, 2.6 MB, 3.2 s pre-roll, 0 parser warnings |
