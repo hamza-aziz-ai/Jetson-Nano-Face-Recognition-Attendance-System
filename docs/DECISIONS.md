@@ -299,3 +299,14 @@ Chosen: 2 (owner)
 Why: The runner needs a registration token typed on the device and an agent with outbound GitHub access that executes workflow jobs; a public repository adds risk to that. The timer needs nothing secret: every 10 minutes `deploy/update.sh` reads the latest release tag (public API, no token) and, if it is newer than `VERSION`, runs that release's `deploy.sh`, which already builds, self-tests, health-checks and rolls back. A failed release is not retried until a newer one exists; it never downgrades; a lock stops overlapping runs; an unreachable GitHub is logged once per outage. Same model as the CCTV edge watcher on the Orin.
 Trade-off: Up to 10 minutes from release to deploy; the Nano needs internet for updates (it stays fully offline for its work); a deploy needs the camera online (health = advancing frames), otherwise it rolls back and that release is skipped. The Deploy workflow stays in the repository for a runner, off unless `NANO_RUNNER` is set.
 Revisit if: several devices need staged rollouts, or the Nano loses internet access permanently.
+
+## D-032: Pull requests with auto-merge for code, docs straight to main, releases from VERSION (owner)
+Options:
+
+1. Push everything to main and tag releases by hand (the practice until v1.1.1)
+2. The CCTV repository's practice: code through a branch and pull request merged automatically on green CI; docs-only changes straight to main; releases made by a workflow, never by hand
+
+Chosen: 2 (owner: "Contact the CCTV session to know how we decide when to create a PR and when to directly push to main")
+Why: CI becomes the merge gate for anything a device runs, and a release cannot be skipped or tagged on an unchecked commit. Code, workflows, deploy scripts, configs and the Makefile go through `feat/`, `fix/`, `ci/` or `docs/` branches with Conventional Commit titles and a What/Proof body; pull requests auto-merge (squash, branch deleted) once the 5 CI checks pass on `main`'s branch protection. Docs and Markdown only go straight to main with `[skip ci]`. A merged change that raises `VERSION` makes the release workflow run CI on that commit, tag it and publish with the CHANGELOG section; the device timer then deploys it (D-031). This repository is public, so GitHub's native auto-merge and branch protection do it; the CCTV repository needs its own automerge workflow only because it is private on GitHub Free.
+Trade-off: Code changes wait for CI (about 3 minutes) before reaching main; admins can still push to main directly, so the rule is followed by practice, not forced.
+Revisit if: other contributors join (then require reviews).
