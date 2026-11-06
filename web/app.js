@@ -3,13 +3,19 @@
   var page = document.body.dataset.page;
 
   // status pill, every 10 s
-  var pill = document.getElementById("status");
+  var pill = document.getElementById("status"), started = null, reach = true;
   function poll() {
     fetch("/api/status", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) { return r.json(); })
-      .then(function (s) { pill.className = "pill " + s.state; pill.textContent = s.detail; })
-      .catch(function () { pill.className = "pill stopped"; pill.textContent = "Page cannot reach the device"; });
+      .then(function (s) {
+        pill.className = "pill " + s.state; pill.textContent = s.detail;
+        // the web server restarted (an update) or came back: its old video connection is gone, open a new one
+        if ((started !== null && s.web_started !== started) || !reach) liveRestart();
+        started = s.web_started; reach = true;
+      })
+      .catch(function () { pill.className = "pill stopped"; pill.textContent = "Page cannot reach the device"; reach = false; });
   }
+  var liveRestart = function () {};
   if (page !== "register") setInterval(poll, 10000);  // the public page has no device status
 
   // small screens: the sidebar opens as a menu
@@ -103,6 +109,8 @@
     if (lb) { lb.textContent = on ? "Pause" : "Resume"; lb.setAttribute("aria-pressed", on ? "false" : "true"); }
   }
   if (img) {
+    liveRestart = function () { if (playing) { playing = false; setLive(true); } };
+    img.addEventListener("error", function () { if (playing) setTimeout(liveRestart, 3000); });  // dropped stream: retry
     setLive(true);
     if (lb) lb.addEventListener("click", function () { setLive(!playing); });
     document.addEventListener("visibilitychange", function () { if (document.hidden) setLive(false); });

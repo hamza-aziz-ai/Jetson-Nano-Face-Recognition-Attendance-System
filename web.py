@@ -1359,6 +1359,7 @@ MAX_BODY = 4096       # forms here are tiny
 MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
 MAX_LIVE = 4          # concurrent MJPEG viewers
 FAIL_LIMIT, FAIL_WINDOW = 10, 900  # failed logins per client before refusing without hashing (PBKDF2 is costly)
+WEB_STARTED = int(time.time())
 SECRET = os.urandom(32)            # per process: CSRF tokens end with a restart, forms then ask to reload
 
 
@@ -1558,8 +1559,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.live()
         if url.path == "/api/health":  # the panel's markup, so the page needs no template of its own
             return self.send(200, json.dumps({"html": health_html(device_health())}), "application/json")
-        if url.path == "/api/status":
-            return self.send(200, json.dumps(status()), "application/json")
+        if url.path == "/api/status":  # web_started lets an open page notice a restart of this server
+            return self.send(200, json.dumps(dict(status(), web_started=WEB_STARTED)), "application/json")
         if url.path.startswith("/rec/") and REC_RE.match(url.path[5:]):
             path = os.path.join(REC_DIR, url.path[5:])
             if os.path.exists(path):
@@ -1793,6 +1794,7 @@ def selftest_http():
         assert code == 200 and "script-src 'self'" in hd.get("Content-Security-Policy", ""), (p, code)
         assert b"aria-current='page'" in body and b"<script>x" not in body, p
     assert b"&lt;script&gt;x&lt;/script&gt;" in get("/attendance")[2]
+    assert json.loads(get("/api/status")[2].decode())["web_started"] == WEB_STARTED
     assert json.loads(get("/api/health")[2].decode())["html"].count("hcard") == 4 and get("/api/health", auth=None)[0] == 401
     assert get("/attendance?date=2026-02-30")[0] == 400 and get("/csv?date=../x")[0] == 400
     code, hd, body = get("/static/app.js", headers={"Range": "bytes=0-9"})
