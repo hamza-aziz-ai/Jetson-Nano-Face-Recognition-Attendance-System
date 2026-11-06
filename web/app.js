@@ -3,10 +3,19 @@
   var page = document.body.dataset.page;
 
   // status pill, every 10 s
-  var pill = document.getElementById("status"), started = null, reach = true;
+  var pill = document.getElementById("status"), started = null, reach = true, out = false;
+  // the session ended (12 h, signed out elsewhere, new password): stop everything and go to the sign-in page
+  function signedIn(r) {
+    if (r.status === 401) {
+      out = true; setLive(false);
+      location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search);
+      throw new Error("signed out");
+    }
+    return r;
+  }
   function poll() {
     fetch("/api/status", { credentials: "same-origin", cache: "no-store" })
-      .then(function (r) { return r.json(); })
+      .then(signedIn).then(function (r) { return r.json(); })
       .then(function (s) {
         pill.className = "pill " + s.state; pill.textContent = s.detail;
         // the web server restarted (an update) or came back: its old video connection is gone, open a new one
@@ -16,7 +25,7 @@
       .catch(function () { pill.className = "pill stopped"; pill.textContent = "Page cannot reach the device"; reach = false; });
   }
   var liveRestart = function () {};
-  if (page !== "register") setInterval(poll, 10000);  // the public page has no device status
+  if (pill) setInterval(poll, 10000);  // public pages (registration, sign-in) have no device status
 
   // small screens: the sidebar opens as a menu
   var mb = document.getElementById("menubtn"), side = document.getElementById("side");
@@ -53,7 +62,7 @@
   if (hp) setInterval(function () {
     if (document.hidden) return;
     fetch("/api/health", { credentials: "same-origin", cache: "no-store" })
-      .then(function (r) { return r.json(); }).then(function (j) { hp.innerHTML = j.html; }).catch(function () {});
+      .then(signedIn).then(function (r) { return r.json(); }).then(function (j) { hp.innerHTML = j.html; }).catch(function () {});
   }, 5000);
 
   // sortable tables
@@ -110,7 +119,13 @@
   }
   if (img) {
     liveRestart = function () { if (playing) { playing = false; setLive(true); } };
-    img.addEventListener("error", function () { if (playing) setTimeout(liveRestart, 3000); });  // dropped stream: retry
+    // dropped stream: retry after 3 s if still signed in (a 401 goes to the sign-in page instead of retrying forever)
+    img.addEventListener("error", function () {
+      if (playing && !out) setTimeout(function () {
+        fetch("/api/status", { credentials: "same-origin", cache: "no-store" }).then(signedIn)
+          .then(function () { liveRestart(); }).catch(function () {});
+      }, 3000);
+    });
     setLive(true);
     if (lb) lb.addEventListener("click", function () { setLive(!playing); });
     document.addEventListener("visibilitychange", function () { if (document.hidden) setLive(false); });
