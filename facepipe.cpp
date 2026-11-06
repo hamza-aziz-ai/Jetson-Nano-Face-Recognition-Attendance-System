@@ -1308,6 +1308,19 @@ int main(int argc, char **argv) {
   METRIC_L2 = metric == "l2";
   if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest();
   mkdir(DATA_DIR.c_str(), 0755);
+  {  // face matching chosen on the website (System page): metric=cosine|l2, cosine=<min similarity>, l2=<max distance>
+    std::ifstream mf(env("FACEPIPE_MATCHING", DATA_DIR + "/matching.conf"));
+    std::string line;
+    while (mf && std::getline(mf, line)) {
+      size_t eq = line.find('=');
+      if (eq == std::string::npos) continue;
+      std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+      float f = (float)std::atof(v.c_str());
+      if (k == "metric" && (v == "cosine" || v == "l2")) METRIC_L2 = v == "l2";
+      else if (k == "cosine" && f >= 0.2f && f <= 0.95f) MATCH = f;
+      else if (k == "l2" && f >= 0.3f && f <= 1.3f) L2_MATCH = f;
+    }
+  }
   LOG_ROOT = env("FACEPIPE_LOGS", app_dir + "/logs");
   IDLE_AFTER = std::atoi(env("FACEPIPE_IDLE_AFTER", "10").c_str());
   IDLE_STEP = std::max(1, std::atoi(env("FACEPIPE_IDLE_STEP", "6").c_str()));

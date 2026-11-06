@@ -232,6 +232,7 @@ Chosen: 2 (owner request), default cosine
 Why: The CCTV system exposes both (`COSINE_THRESHOLD` 0.5, `L2_THRESHOLD` 0.95); the Nano uses the same model and normalisation, so the same settings carry over. Embeddings are L2-normalised, so L2 = sqrt(2 - 2 cosine): the closest photo is identical under both, and only the threshold rule differs. The defaults are not equivalent: L2 0.95 equals cosine 0.549, slightly stricter than cosine 0.5.
 Trade-off: Two thresholds to tune; events always store the cosine score and also the L2 distance and the metric used, so the dashboard and reports stay comparable.
 Revisit if: a labelled evaluation shows one metric and threshold clearly better.
+Update 2026-11-07 (owner): the toggle is also on the website's System page (`data/matching.conf` overrides the `facepipe.env` values; bounded thresholds; recognition restarts).
 
 ## D-026: Release assets built on the Nano; no Docker images (owner)
 Options:

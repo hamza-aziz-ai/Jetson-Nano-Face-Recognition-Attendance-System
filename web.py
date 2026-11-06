@@ -240,6 +240,9 @@ FLASH = {  # fixed messages only: the query string never reflects text into the 
     "cam_saved_inactive": ("ok", "Saved. Network cameras are not in use now; choose Network cameras above to use them."),
     "cam_none": ("ok", "No camera is enabled, so recognition was stopped."), "cam_none_enabled": ("bad", "Enable a network camera first (in the list below)."),
     "cam_nousb": ("bad", "That USB camera is not connected."), "cam_bad": ("bad", "Check the name and the address (it must start with rtsp://)."),
+    "match_saved": ("ok", "Face matching saved; recognition restarted with it."),
+    "match_saved_stopped": ("ok", "Face matching saved. Recognition is stopped; it applies when you start it."),
+    "match_bad": ("bad", "Check the values: cosine 0.30 to 0.90, L2 0.50 to 1.20."),
     "cam_added": ("ok", "Camera added."), "cam_removed": ("ok", "Camera removed."), "cam_noprev": ("bad", "There is no earlier camera setup to restore."),
     "cam_test_ok": ("ok", "The camera answered."), "cam_test_bad": ("bad", "The camera test failed; see the line under its name."), "denied": ("bad", "The request was refused (expired form or another site).")}
 esc = html.escape
@@ -443,6 +446,7 @@ def page_system(csrf, flash):
 <dl class="kv"><dt>systemd state</dt><dd>%s</dd><dt>Wanted state</dt><dd>%s</dd><dt>Frame rate</dt><dd>%s</dd>
 <dt>Detections per second</dt><dd>%s</dd><dt>Frames processed</dt><dd>%s</dd><dt>Camera</dt><dd>%s</dd></dl>
 <div class="actions">%s</div></section>
+<section aria-labelledby="h-match"><div class="sh"><h2 id="h-match">Face matching</h2><span class="count">in use: %s</span></div>%s</section>
 <section aria-labelledby="h-dev"><div class="sh"><h2 id="h-dev">Device</h2></div>
 <dl class="kv"><dt>Software</dt><dd>facepipe %s (web %s)</dd><dt>microSD card</dt><dd>%s <span class="muted">(system, app, data and logs)</span></dd>
 <dt>Recordings</dt><dd>%s <span class="muted">(clips and evidence; a volume on the microSD card)</span></dd>
@@ -451,7 +455,9 @@ def page_system(csrf, flash):
 <pre class="log">%s</pre></section>""" % (
         health_html(device_health()), st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
         "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
-        st.get("frames", "&ndash;"), esc(camera_label()), buttons, esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
+        st.get("frames", "&ndash;"), esc(camera_label()), buttons,
+        "cosine &ge; %.2f" % matching()["cosine"] if matching()["metric"] == "cosine" else "L2 &le; %.2f" % matching()["l2"],
+        matching_html(csrf), esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
         esc(disk(REC_DIR)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
     return layout("system", "System", body, flash=flash)
 
@@ -553,6 +559,70 @@ def health_html(h):
              meter(mem_pct, "ok" if (m["available"] or 0) >= LOW_MEM_MB else "warn"), used / 1024.0, (m["total"] or 0) / 1024.0,
              "ok" if (m["available"] or 0) >= LOW_MEM_MB else "warn", m["available"] or 0, m["swap_used"], m["swap_total"] or 0,
              h["uptime_h"] if h["uptime_h"] is not None else "?")
+
+
+# ---------- face matching (D-025): cosine or L2, chosen on the System page ----------
+MATCH_CONF = os.path.join(DATA, "matching.conf")
+COS_RANGE, L2_RANGE = (0.30, 0.90), (0.50, 1.20)
+
+
+def env_value(key, default):
+    try:
+        for line in open(os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "facepipe.env"), encoding="utf-8"):
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return default
+
+
+def matching():
+    """the settings facepipe uses: data/matching.conf over facepipe.env over the defaults"""
+    m = {"metric": env_value("FACEPIPE_METRIC", "cosine").lower(), "cosine": float(env_value("FACEPIPE_MATCH", "0.5")),
+         "l2": float(env_value("FACEPIPE_L2_MATCH", "0.95"))}
+    try:
+        for line in open(MATCH_CONF):
+            k, _, v = line.strip().partition("=")
+            if k == "metric" and v in ("cosine", "l2"):
+                m["metric"] = v
+            elif k in ("cosine", "l2"):
+                m[k] = float(v)
+    except (OSError, ValueError):
+        pass
+    return m
+
+
+def save_matching(form):
+    try:
+        metric = form.get("metric", [""])[0]
+        cos, l2 = float(form.get("cosine", [""])[0]), float(form.get("l2", [""])[0])
+    except ValueError:
+        return "match_bad"
+    if metric not in ("cosine", "l2") or not COS_RANGE[0] <= cos <= COS_RANGE[1] or not L2_RANGE[0] <= l2 <= L2_RANGE[1]:
+        return "match_bad"
+    write_private(MATCH_CONF, "metric=%s\ncosine=%.2f\nl2=%.2f\n" % (metric, cos, l2))
+    LOG.write("INFO", "face matching set to %s (cosine %.2f, L2 %.2f)" % (metric, cos, l2))
+    if read_desired() == "stopped":
+        return "match_saved_stopped"
+    return "match_saved" if service_action("restart") == "restarted" else "failed"
+
+
+def matching_html(csrf):
+    m = matching()
+
+    def opt(v, title, text):
+        return ("<label class='choice'><input type='radio' name='metric' value='%s'%s><span><b>%s</b><small>%s</small></span></label>"
+                % (v, " checked" if m["metric"] == v else "", title, text))
+    return """<form method="post" action="/system/matching" class="body form wide" data-confirm="Recognition restarts with the new rule; video stops for a few seconds." data-title="Change face matching?" data-ok="Save" data-kind="primary">
+<input type="hidden" name="csrf" value="%s">
+<div class="choices">%s%s</div>
+<div class="row"><label class="field"><span>Cosine: match when similarity is at least</span><input name="cosine" type="number" step="0.01" min="%.2f" max="%.2f" value="%.2f" required></label>
+<label class="field"><span>L2: match when distance is at most</span><input name="l2" type="number" step="0.01" min="%.2f" max="%.2f" value="%.2f" required></label></div>
+<small class="muted">Both compare the same face templates and always pick the same closest person; only the pass rule differs. They relate as L2 = &radic;(2 &minus; 2 &times; cosine): cosine 0.50 is L2 1.00, L2 0.95 is cosine 0.55. Higher cosine or lower L2 means stricter: fewer false matches, more faces left Unknown.</small>
+<div><button class="btn primary" type="submit">Save and apply</button></div></form>""" % (
+        csrf, opt("cosine", "Cosine similarity", "default; the same rule as the CCTV system"),
+        opt("l2", "L2 distance", "Euclidean distance between templates"),
+        COS_RANGE[0], COS_RANGE[1], m["cosine"], L2_RANGE[0], L2_RANGE[1], m["l2"])
 
 
 # ---------- service control (D-033): exact sudoers rule for start/stop/restart of facepipe only ----------
@@ -1557,6 +1627,9 @@ class Handler(BaseHTTPRequestHandler):
             back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras") else "system")
             return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
+        if path == "/system/matching":
+            with _enroll_lock:
+                return self.redirect("/system?msg=" + save_matching(form))
         if path == "/system/service":
             return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0]))
         if path == "/people/invite":
@@ -1674,6 +1747,8 @@ def selftest_checks():
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
     assert service_action("rm -rf") == "denied" and camera_label() in camera_label()
     assert csrf_token("a") == csrf_token("a") != csrf_token("b")
+    assert save_matching({"metric": ["l2"], "cosine": ["0.5"], "l2": ["2.0"]}) == "match_bad"  # out of range: nothing written
+    assert not os.path.exists(MATCH_CONF) and "Cosine similarity" in matching_html("t")
     h = device_health()  # whatever this machine exposes; the panel must render either way
     assert "Temperature" in health_html(h) and h["level"] in ("ok", "warn", "bad") and isinstance(h["cpu"], list)
     selftest_http()

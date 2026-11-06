@@ -55,7 +55,7 @@ h2{font-size:1.02rem;margin:0;font-weight:650}h3{font-size:.95rem;margin:0;font-
 .btn.danger{color:var(--bad);border-color:#fda29b}.btn.danger:hover{background:var(--badbg)}
 .btn.danger-solid{background:#d92d20;border-color:#d92d20;color:#fff}.btn.danger-solid:hover{background:var(--bad)}
 .btn[aria-disabled=true],.btn:disabled{opacity:.45;pointer-events:none}
-input[type=date],input[type=search],input[type=text],input[type=password],input:not([type]),select{font:inherit;font-size:.9rem;color:var(--ink);
+input[type=date],input[type=search],input[type=number],input[type=text],input[type=password],input:not([type]),select{font:inherit;font-size:.9rem;color:var(--ink);
  border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:.5rem .75rem;box-shadow:0 1px 2px rgba(16,24,40,.05);min-height:38px}
 input:focus,select:focus{outline:none;border-color:#84adff;box-shadow:0 0 0 4px #e0eaff}
 .toolbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1.3rem}.toolbar .grow,.grow{flex:1}
