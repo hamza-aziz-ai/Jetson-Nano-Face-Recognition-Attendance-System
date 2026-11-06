@@ -2,6 +2,11 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## Release v1.0.0: 2026-11-06 (model: Claude Opus 5.5)
+
+Done: every README validation item verified on the Nano (RTSP, USB, CSI cameras; clips and evidence; RTSP in VLC). v1.0.0 released.
+Next: register the self-hosted runner for automated deploys and release assets; MLOps model manifest; LFW evaluation (download needs owner permission); open items in ASSUMPTIONS.md (threshold tuning, rotation, power).
+
 ## Update: 2026-11-06 late night (model: Claude Opus 5.5)
 
 Done: matching metric toggle (D-025); release assets and Deploy to Nano workflow with automatic rollback (D-026), switched off until the runner exists; README System Design and Solution Architecture (D-024).

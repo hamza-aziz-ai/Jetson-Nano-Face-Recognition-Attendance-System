@@ -49,4 +49,5 @@ CSI HQ Camera (IMX477) 1080p:                [facepipe] fps 15.0 frames 509; as 
 CSI recognition (events):                    hamza_aziz 0.693 (l2 0.783), 0.615 (l2 0.877); unknown 0.375 (l2 1.118)
 Event clip (real event):                     h264 1920x1080, duration 8.785 s, 133 frames; evidence JPEG 174,571 bytes
 Evidence label after the fix:                evidence JPEG shows green "hamza aziz 0.62"
+RTSP in VLC:                                 rtsp://<nano>:8554/live plays with the RTSP login (owner, 2026-11-06)
 ```

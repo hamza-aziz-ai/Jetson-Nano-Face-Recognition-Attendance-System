@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-06
+
+Every item in the README validation table is now verified on a Jetson Nano: RTSP, USB and CSI cameras, detection, tracking, recognition, enrollment, attendance log, dashboard, event clips with evidence images, and the RTSP stream in VLC.
+
 ### Fixed
 
 - CSI cameras delivered no frames to DeepStream on JetPack 4.6 (`nvarguscamerasrc bufapi-version=1`). Verified with the Raspberry Pi HQ Camera (IMX477, resistor R8 removed).
@@ -62,5 +66,6 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/releases/tag/v0.9.0
