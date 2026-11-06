@@ -6,7 +6,7 @@ No dependency is downloaded at build or run time; everything comes with JetPack 
 
 | Dependency | Version | Why | Maintainer |
 | --- | --- | --- | --- |
-| DeepStream SDK | 6.0.1 | Pipeline elements: nvstreammux, nvinfer, nvtracker, nvdsosd, nvvideoconvert | NVIDIA |
+| DeepStream SDK | 6.0.1 | Pipeline elements: nvstreammux, nvtracker, nvdsosd, nvvideoconvert; NvBufSurfTransform (VIC) for the detector input | NVIDIA |
 | TensorRT | 8.2.1 | Inference engines | NVIDIA |
 | CUDA | 10.2 | GPU memory and copies | NVIDIA |
 | GStreamer | 1.14.5 | Pipeline framework, appsink/appsrc, mp4mux, rtph264pay | GStreamer project via Ubuntu |

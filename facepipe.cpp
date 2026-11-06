@@ -1,6 +1,8 @@
 // Standalone face attendance for the Jetson Nano (DeepStream 6.0.1, TensorRT 8.2, JetPack 4.6.6). No server needed.
-// Live:   uridecodebin -> nvstreammux -> nvvideoconvert(RGBA) -> nvinfer(SCRFD-10G 640x384, raw tensors)
-//           -> [probe: SCRFD decode + NMS, adds face objects, landmarks packed in misc_obj_info]
+// Live:   uridecodebin -> nvstreammux -> nvvideoconvert(RGBA)
+//           -> [probe: SCRFD-10G 640x384 on chosen frames (VIC letterbox + own TensorRT engine), decode + NMS,
+//               adds face objects, landmarks packed in misc_obj_info; every frame while faces are around, every
+//               FACEPIPE_IDLE_STEP-th after FACEPIPE_IDLE_AFTER s without one]
 //           -> nvtracker -> [probe: per track, Umeyama align 112x112, queue] -> fakesink.
 //         A worker runs w600k_r50, matches the gallery (cosine, like CCTV COSINE_THRESHOLD) and appends one event per
 //         track to $FACEPIPE_DATA/events-YYYY-MM-DD.jsonl with a face snapshot. Unknown tracks are retried a few times.
@@ -18,7 +20,9 @@
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
 //      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554),
 //      FACEPIPE_WATCHDOG (seconds without frames before exiting, default 60, 0 = off),
-//      FACEPIPE_LOGS (log folder, default $FACEPIPE_DIR/logs).
+//      FACEPIPE_LOGS (log folder, default $FACEPIPE_DIR/logs), FACEPIPE_IDLE_AFTER (seconds without a face before
+//      detecting less often, default 10, 0 = always every frame), FACEPIPE_IDLE_STEP (detect every Nth frame while
+//      idle, default 6).
 // stdout: one JSON line per recognition attempt (with the embedding); logs: $FACEPIPE_LOGS/<year>/<Month>/facepipe.log
 // (enroll.log for facepipe-enroll), also on stderr for the journal.
 
@@ -35,6 +39,7 @@
 #include "gstnvdsmeta.h"
 #include "gstnvdsinfer.h"
 #include "nvbufsurface.h"
+#include "nvbufsurftransform.h"
 
 #include <algorithm>
 #include <atomic>
@@ -330,11 +335,12 @@ struct Engine {
     }
   }
   const float *out(const char *name) { int i = eng->getBindingIndex(name); return i < 0 ? nullptr : host[i].data(); }
-  void run() {
-    cudaMemcpy(dev[0], host[0].data(), host[0].size() * sizeof(float), cudaMemcpyHostToDevice);
-    ctx->executeV2(dev.data());
-    for (size_t i = 1; i < dev.size(); i++)
-      cudaMemcpy(host[i].data(), dev[i], host[i].size() * sizeof(float), cudaMemcpyDeviceToHost);
+  bool run() {
+    bool ok = cudaMemcpy(dev[0], host[0].data(), host[0].size() * sizeof(float), cudaMemcpyHostToDevice) == cudaSuccess &&
+              ctx->executeV2(dev.data());
+    for (size_t i = 1; ok && i < dev.size(); i++)
+      ok = cudaMemcpy(host[i].data(), dev[i], host[i].size() * sizeof(float), cudaMemcpyDeviceToHost) == cudaSuccess;
+    return ok;
   }
 };
 
@@ -741,37 +747,123 @@ static void rec_worker() {
 // ---- probes ----
 static int mux_w = 1920, mux_h = 1080;
 
-static GstPadProbeReturn pgie_probe(GstPad *, GstPadProbeInfo *info, gpointer) {
-  NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(GST_PAD_PROBE_INFO_BUFFER(info));
-  float inv_scale = 1.f / std::min((float)NET_W / mux_w, (float)NET_H / mux_h);  // maintain-aspect-ratio, pad right/bottom
-  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
-    auto *fm = (NvDsFrameMeta *)l->data;
-    for (NvDsMetaList *u = fm->frame_user_meta_list; u; u = u->next) {
-      auto *um = (NvDsUserMeta *)u->data;
-      if (um->base_meta.meta_type != NVDSINFER_TENSOR_OUTPUT_META) continue;
-      fm->bInferDone = TRUE;  // network-type=100 leaves it 0, and nvtracker then ignores this frame's detections
-      auto *tm = (NvDsInferTensorMeta *)um->user_meta_data;
-      auto get = [tm](const char *name) -> const float * {
-        for (unsigned i = 0; i < tm->num_output_layers; i++)
-          if (!strcmp(tm->output_layers_info[i].layerName, name)) return (const float *)tm->out_buf_ptrs_host[i];
-        return nullptr;
-      };
-      for (auto &f : decode_scrfd(get, inv_scale)) {
-        float l = std::max(0.f, f.x1), t = std::max(0.f, f.y1);
-        float w = std::min((float)mux_w, f.x2) - l, h = std::min((float)mux_h, f.y2) - t;
-        if (w <= 0 || h <= 0) continue;
-        NvDsObjectMeta *o = nvds_acquire_obj_meta_from_pool(bm);
-        o->unique_component_id = 1;
-        o->class_id = 0;
-        o->object_id = UNTRACKED_OBJECT_ID;
-        o->confidence = f.score;
-        o->rect_params.left = l; o->rect_params.top = t; o->rect_params.width = w; o->rect_params.height = h;
-        strncpy(o->obj_label, "face", MAX_LABEL_SIZE);
-        pack_kps(o, f.kps);
-        nvds_add_obj_meta_to_frame(fm, o, nullptr);
-      }
+// ---- detection (D-028): SCRFD in a probe before the tracker instead of nvinfer, whose `interval` cannot change while
+// playing. Every frame while faces are around; after IDLE_AFTER s without one, every IDLE_STEP-th frame. Video buffers
+// always pass, only inference is skipped; a frame without inference keeps bInferDone=FALSE and the tracker only tracks it.
+static int IDLE_AFTER = 10, IDLE_STEP = 6;
+static Engine live_det;
+static NvBufSurface *det_in = nullptr;  // 640x384 RGBA letterbox target; its padding is zeroed once and never written
+static long last_face_s = 0;            // steady second of the last frame with a face (streaming thread only)
+static std::atomic<long> n_detects{0};
+
+// the policy, separate so the self-test can check it: start active; idle after IDLE_AFTER s without a face
+static bool detect_due(long now, long last_face, unsigned long long &idle_n) {
+  if (IDLE_AFTER <= 0 || now - last_face < IDLE_AFTER) { idle_n = 0; return true; }
+  return idle_n++ % IDLE_STEP == 0;
+}
+
+static bool det_setup() {
+  live_det.load(DET_ENGINE.c_str(), nvinfer1::Dims4{1, 3, NET_H, NET_W});
+  NvBufSurfaceCreateParams cp = {};
+  cp.gpuId = 0;
+  cp.width = NET_W;
+  cp.height = NET_H;
+  cp.colorFormat = NVBUF_COLOR_FORMAT_RGBA;
+  cp.layout = NVBUF_LAYOUT_PITCH;
+  cp.memType = NVBUF_MEM_DEFAULT;
+  if (NvBufSurfaceCreate(&det_in, 1, &cp) != 0) return false;
+  det_in->numFilled = 1;
+  last_face_s = steady_s();  // start active
+  return NvBufSurfaceMemSet(det_in, 0, 0, 0) == 0;
+}
+
+// Letterbox frame b into det_in on the VIC (scale by the smaller ratio, top-left, padding right/bottom: what nvinfer did
+// with maintain-aspect-ratio=1, symmetric-padding=0), then SCRFD's input: RGB CHW, (x - 127.5) / 128.
+static bool det_prepare(NvBufSurface *surf, int b, float scale) {
+  NvBufSurfTransformConfigParams cfg = {};
+  cfg.compute_mode = NvBufSurfTransformCompute_Default;  // VIC on Jetson
+  if (NvBufSurfTransformSetSessionParams(&cfg) != NvBufSurfTransformError_Success) return false;
+  NvBufSurface one = *surf;  // just frame b
+  one.surfaceList = &surf->surfaceList[b];
+  one.batchSize = one.numFilled = 1;
+  NvBufSurfTransformRect src = {0, 0, surf->surfaceList[b].width, surf->surfaceList[b].height};
+  NvBufSurfTransformRect dst = {0, 0, (guint)lrintf(src.width * scale), (guint)lrintf(src.height * scale)};
+  NvBufSurfTransformParams p = {};
+  p.transform_flag = NVBUFSURF_TRANSFORM_FILTER | NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;
+  p.transform_filter = NvBufSurfTransformInter_Bilinear;
+  p.src_rect = &src;
+  p.dst_rect = &dst;
+  if (NvBufSurfTransform(&one, det_in, &p) != NvBufSurfTransformError_Success) return false;
+  if (NvBufSurfaceMap(det_in, 0, 0, NVBUF_MAP_READ) != 0) return false;
+  NvBufSurfaceSyncForCpu(det_in, 0, 0);
+  const NvBufSurfaceParams &d = det_in->surfaceList[0];
+  float *in = live_det.host[0].data();
+  const int plane = NET_W * NET_H;
+  for (int y = 0; y < NET_H; y++) {
+    const unsigned char *row = (const unsigned char *)d.mappedAddr.addr[0] + (size_t)y * d.pitch;
+    for (int x = 0; x < NET_W; x++) {
+      const unsigned char *q = row + 4 * x;
+      int i = y * NET_W + x;
+      in[i] = (q[0] - 127.5f) * 0.0078125f;
+      in[plane + i] = (q[1] - 127.5f) * 0.0078125f;
+      in[2 * plane + i] = (q[2] - 127.5f) * 0.0078125f;
     }
   }
+  NvBufSurfaceUnMap(det_in, 0, 0);
+  return true;
+}
+
+static void add_faces(NvDsBatchMeta *bm, NvDsFrameMeta *fm, const std::vector<Face> &faces) {
+  for (auto &f : faces) {
+    float l = std::max(0.f, f.x1), t = std::max(0.f, f.y1);
+    float w = std::min((float)mux_w, f.x2) - l, h = std::min((float)mux_h, f.y2) - t;
+    if (w <= 0 || h <= 0) continue;
+    NvDsObjectMeta *o = nvds_acquire_obj_meta_from_pool(bm);
+    o->unique_component_id = 1;
+    o->class_id = 0;
+    o->object_id = UNTRACKED_OBJECT_ID;
+    o->confidence = f.score;
+    o->rect_params.left = l; o->rect_params.top = t; o->rect_params.width = w; o->rect_params.height = h;
+    strncpy(o->obj_label, "face", MAX_LABEL_SIZE);
+    pack_kps(o, f.kps);
+    nvds_add_obj_meta_to_frame(fm, o, nullptr);
+  }
+}
+
+static GstPadProbeReturn detect_probe(GstPad *, GstPadProbeInfo *info, gpointer) {
+  static unsigned long long idle_n = 0;
+  static long fails = 0;
+  static bool was_idle = false;
+  GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+  NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(buf);
+  long now = steady_s();
+  bool idle = IDLE_AFTER > 0 && now - last_face_s >= IDLE_AFTER;
+  if (idle != was_idle) {
+    was_idle = idle;
+    if (idle) LOGI("no face for %d s: detecting every %d frame(s)", IDLE_AFTER, IDLE_STEP);
+    else LOGI("face seen: detecting every frame");
+  }
+  if (!bm || !detect_due(now, last_face_s, idle_n)) return GST_PAD_PROBE_OK;
+  GstMapInfo mi;
+  if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) return GST_PAD_PROBE_OK;
+  auto *surf = (NvBufSurface *)mi.data;
+  float scale = std::min((float)NET_W / mux_w, (float)NET_H / mux_h);
+  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
+    auto *fm = (NvDsFrameMeta *)l->data;
+    if (!det_prepare(surf, fm->batch_id, scale) || !live_det.run()) {
+      if (fails++ % 1000 == 0) LOGW("detection failed (%ld frames so far); those frames pass without faces", fails);
+      continue;
+    }
+    n_detects++;
+    fm->bInferDone = TRUE;  // without it nvtracker ignores this frame's detections
+    auto faces = decode_scrfd([](const char *name) { return live_det.out(name); }, 1.f / scale);
+    if (!faces.empty()) {
+      last_face_s = now;
+      if (was_idle) { was_idle = false; LOGI("face seen: detecting every frame"); }
+    }
+    add_faces(bm, fm, faces);
+  }
+  gst_buffer_unmap(buf, &mi);
   return GST_PAD_PROBE_OK;
 }
 
@@ -876,22 +968,25 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
 static guint frame_step();
 
 static gboolean report(gpointer) {
-  static long last = 0;
+  static long last = 0, last_det = 0;
   static auto t = std::chrono::steady_clock::now();
   auto now = std::chrono::steady_clock::now();
   double dt = std::chrono::duration<double>(now - t).count();
   long f = n_frames;
-  double fps = (f - last) / dt;
+  if (dt < 1) { last = f; last_det = n_detects; return TRUE; }  // first call: start the interval
+  double fps = (f - last) / dt, dps = (n_detects - last_det) / dt;
+  last_det = n_detects;
   static int calls = 0;
   if (calls++ % 12 == 0)  // one log line a minute; status.json every 5 s
-    LOGI("fps %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld", fps, f, (long)n_faces, (long)n_known,
-         (long)n_unknown, (long)n_dropped);
+    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld", fps, dps, f, (long)n_faces,
+         (long)n_known, (long)n_unknown, (long)n_dropped);
   last = f; t = now;
   // status.json for the web page (written to a temp file, then renamed so readers never see half a file)
   std::string tmp = DATA_DIR + "/status.json.tmp";
   if (FILE *s = fopen(tmp.c_str(), "w")) {
-    fprintf(s, "{\"version\":\"%s\",\"updated\":%ld,\"fps\":%.1f,\"frames\":%ld,\"known\":%ld,\"unknown\":%ld,\"step\":%u}\n",
-            FACEPIPE_VERSION, (long)time(nullptr), fps, f, (long)n_known, (long)n_unknown, frame_step());
+    fprintf(s, "{\"version\":\"%s\",\"updated\":%ld,\"fps\":%.1f,\"det_fps\":%.1f,\"frames\":%ld,\"known\":%ld,\"unknown\":%ld,"
+               "\"step\":%u}\n",
+            FACEPIPE_VERSION, (long)time(nullptr), fps, dps, f, (long)n_known, (long)n_unknown, frame_step());
     fclose(s);
     rename(tmp.c_str(), (DATA_DIR + "/status.json").c_str());
   }
@@ -1120,6 +1215,17 @@ static int selftest() {
   unlink(log_backup_name(f, t).c_str());
   rmdir(tmpl);
   LOG_ROOT.clear();
+  int ia = IDLE_AFTER, is = IDLE_STEP;  // detection policy: active until IDLE_AFTER s without a face, then every IDLE_STEP
+  IDLE_AFTER = 10; IDLE_STEP = 6;
+  unsigned long long n = 0;
+  for (int i = 0; i < 20; i++) assert(detect_due(100, 95, n));  // a face 5 s ago: every frame
+  int due = 0;
+  for (int i = 0; i < 60; i++) due += detect_due(100, 80, n);   // 20 s ago: every 6th
+  assert(due == 10);
+  assert(detect_due(100, 100, n) && n == 0);                    // a new face: every frame again
+  IDLE_AFTER = 0;
+  for (int i = 0; i < 20; i++) assert(detect_due(1000, 0, n));  // idle mode off
+  IDLE_AFTER = ia; IDLE_STEP = is;
   printf("selftest ok\n");
   return 0;
 }
@@ -1141,6 +1247,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest();
   mkdir(DATA_DIR.c_str(), 0755);
   LOG_ROOT = env("FACEPIPE_LOGS", app_dir + "/logs");
+  IDLE_AFTER = std::atoi(env("FACEPIPE_IDLE_AFTER", "10").c_str());
+  IDLE_STEP = std::max(1, std::atoi(env("FACEPIPE_IDLE_STEP", "6").c_str()));
 #ifdef FACEPIPE_ENROLL
   LOG_MODULE = "enroll";
 #endif
@@ -1166,6 +1274,9 @@ int main(int argc, char **argv) {
           frame_step(), METRIC_L2 ? "L2" : "cosine", METRIC_L2 ? "<=" : ">=", METRIC_L2 ? L2_MATCH : MATCH, DATA_DIR.c_str());
   start_watchdog();
   gst_init(&argc, &argv);
+  if (!det_setup()) { LOGE("detector setup failed (engine %s or the 640x384 surface)", DET_ENGINE.c_str()); return 1; }
+  LOGI("detection: every frame; after %d s without a face every %d frame(s)%s", IDLE_AFTER, IDLE_STEP,
+       IDLE_AFTER > 0 ? "" : " (idle mode off)");
   std::thread worker(rec_worker);
 
   GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
@@ -1184,7 +1295,7 @@ int main(int argc, char **argv) {
   }
   GstElement *mux = make("nvstreammux", "mux"),
              *conv = make("nvvideoconvert", "conv"), *caps = make("capsfilter", "caps"),
-             *pgie = make("nvinfer", "pgie"), *trk = make("nvtracker", "trk"), *osd = make("nvdsosd", "osd"),
+             *trk = make("nvtracker", "trk"), *osd = make("nvdsosd", "osd"),
              *t = make("tee", "t"),
              // NVJPG branch: annotated JPEG for the live page and event evidence
              *qj = make("queue", "qj"), *cj = make("nvvideoconvert", "cj"), *fj = make("capsfilter", "fj"),
@@ -1221,10 +1332,9 @@ int main(int argc, char **argv) {
   GstCaps *rgba = gst_caps_from_string("video/x-raw(memory:NVMM), format=RGBA");
   g_object_set(caps, "caps", rgba, nullptr);
   gst_caps_unref(rgba);
-  g_object_set(pgie, "config-file-path", (dir + "/pgie_scrfd.txt").c_str(), nullptr);
   g_object_set(trk, "ll-lib-file", "/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_nvmultiobjecttracker.so",
                "ll-config-file", (dir + "/tracker.yml").c_str(), "tracker-width", 640, "tracker-height", 384, nullptr);
-  gst_bin_add_many(GST_BIN(pipe), src, mux, conv, caps, pgie, trk, osd, t, qj, cj, fj, jenc, sj, qh, ch, fh, henc, hp, fh2,
+  gst_bin_add_many(GST_BIN(pipe), src, mux, conv, caps, trk, osd, t, qj, cj, fj, jenc, sj, qh, ch, fh, henc, hp, fh2,
                    te, qr, pay, us, qa, sh, nullptr);
   GstPad *msink = gst_element_get_request_pad(mux, "sink_0");
   gst_pad_add_probe(msink, GST_PAD_PROBE_TYPE_BUFFER, drop_probe, nullptr, nullptr);
@@ -1235,7 +1345,7 @@ int main(int argc, char **argv) {
   } else {
     g_signal_connect(src, "pad-added", G_CALLBACK(on_pad), msink);
   }
-  if (!gst_element_link_many(mux, conv, caps, pgie, trk, osd, t, nullptr) ||
+  if (!gst_element_link_many(mux, conv, caps, trk, osd, t, nullptr) ||
       !gst_element_link_many(t, qj, cj, fj, jenc, sj, nullptr) ||
       !gst_element_link_many(t, qh, ch, fh, henc, hp, fh2, te, nullptr) ||
       !gst_element_link_many(te, qr, pay, us, nullptr) || !gst_element_link_many(te, qa, sh, nullptr)) {
@@ -1244,8 +1354,8 @@ int main(int argc, char **argv) {
   }
   start_rtsp();
 
-  GstPad *p = gst_element_get_static_pad(pgie, "src");
-  gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, pgie_probe, nullptr, nullptr);
+  GstPad *p = gst_element_get_static_pad(caps, "src");
+  gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, detect_probe, nullptr, nullptr);
   gst_object_unref(p);
   p = gst_element_get_static_pad(trk, "src");
   gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, tracker_probe, nullptr, nullptr);

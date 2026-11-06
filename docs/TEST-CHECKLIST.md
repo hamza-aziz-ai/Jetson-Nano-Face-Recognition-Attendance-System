@@ -60,3 +60,11 @@ v1.0.3 checks on the Nano (2026-11-06):
 | Self-tests (log line format, 12-hour clock, daily backup and month folders) | `./facepipe --selftest && ./facepipe-enroll --selftest && python3 web.py --selftest` | ok |
 | Log file | test instance on `sample_1080p_h264.mp4` | `logs/2026/November/facepipe.log`, lines like `[06-11-2026] 04:00:59.516 PM, Friday [INFO] fps 6.6 frames 342 ...` |
 | Clean stop | `kill -TERM` on the test instance | `stopping (signal)` then `stopped`, process gone in 2.7 s |
+
+v1.1.0 checks on the Nano (2026-11-06):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Self-tests (detection policy: every frame within 10 s of a face, every 6th after, back at once, off with 0) | `./facepipe --selftest` | ok |
+| Same results as nvinfer | gallery photos as a 17 s 1080p video, run through v1.0.3 and v1.1.0 (`FACEPIPE_IDLE_AFTER=0`), stdout JSON compared | same frame, same box [786, 266, 1172, 744], embedding cosine 1.0000, both `hamza_aziz` 0.979 |
+| Empty scene, CSI camera | live service, `tegrastats`, `status.json` | 15.0 fps, `det_fps` 2.4-2.6, GPU 0% in the samples, CPU about 20% per core |

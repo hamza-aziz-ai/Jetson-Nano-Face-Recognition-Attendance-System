@@ -20,7 +20,7 @@ Docs-only and CI-only changes go into `[Unreleased]` and ship with the next rele
 
 ## Release assets
 
-Each release carries what a Nano installs, built and tested on a Nano: both binaries, `web.py`, `VERSION`, `pgie_scrfd.txt`, `facepipe.env.example`, `check_vs_rest.py`, the deploy scripts, README and CHANGELOG, plus `SHA256SUMS`. Models, engines, logins, data and the gallery are never included. Verify with `sha256sum -c SHA256SUMS`. There are no Docker images: the project runs natively on the Nano (D-026).
+Each release carries what a Nano installs, built and tested on a Nano: both binaries, `web.py`, `VERSION`, `facepipe.env.example`, `check_vs_rest.py`, the deploy scripts, README and CHANGELOG, plus `SHA256SUMS`. Models, engines, logins, data and the gallery are never included. Verify with `sha256sum -c SHA256SUMS`. There are no Docker images: the project runs natively on the Nano (D-026).
 
 ## Rollback
 

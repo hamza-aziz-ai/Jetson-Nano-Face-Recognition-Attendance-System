@@ -262,7 +262,8 @@ Options:
 Chosen: 2 (owner chose "adaptive, keep video smooth"; design agreed with Codex in a council, 5 exchanges). Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council).
 Why: nvinfer's `interval` is changeable only in NULL or READY state. Option 2 keeps one frame path and reuses `Engine`, `decode_scrfd` and the landmark gate; video buffers are never skipped, only inference. Policy: start active; after 10 s without a raw detection, detect every 6th processed frame (2.5/s); the first face restores full rate. Detector work idle: about 765 to 128 ms per second (arithmetic, not a GPU-load prediction).
 Trade-off: Up to about 400 ms more before the first detection of someone entering an empty scene. Detection runs in the streaming thread, so smoothness must be measured, not assumed.
-Revisit if: measured output cadence falls below 15 fps under recognition load (then option 1). Status: accepted, to implement in v1.1.0.
+Revisit if: measured output cadence falls below 15 fps under recognition load (then option 1).
+Status: implemented in v1.1.0. Same results as nvinfer on identical frames (gallery test video: same box, embedding cosine 1.0000, same match 0.979). Empty scene on the CSI camera: 14.8-15.0 fps (12.2 before), 2.4 detections/s, GPU about 0% between detections. Still to measure: delivery gaps and fps with faces present during recognition bursts.
 
 ## D-029: Bounded shutdown and recovery (council)
 Options:

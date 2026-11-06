@@ -13,7 +13,7 @@ Keep this file and `CLAUDE.md` synchronized (CI fails if they differ). They hold
 A standalone face attendance system for one Jetson Nano 4 GB (JetPack 4.6.x, L4T 32.7, DeepStream 6.0.1, TensorRT 8.2, CUDA 10.2, GStreamer 1.14, Python 3.6). Fully offline. One C++ process (`facepipe`) runs the video pipeline; one Python stdlib process (`web.py`) serves the dashboard. Both run as systemd services rendered by `deploy/install.sh`.
 
 ```text
-camera (RTSP / file / USB / CSI) -> frame drop probe -> nvstreammux -> SCRFD-10G (nvinfer, raw tensors, custom decode)
+camera (RTSP / file / USB / CSI) -> frame drop probe -> nvstreammux -> SCRFD-10G (own TensorRT engine in a probe, VIC letterbox; adaptive rate, D-028)
   -> nvtracker (IOU) -> ArcFace r50 worker thread (own TensorRT engine, Umeyama alignment) -> gallery match (cosine or L2)
   -> nvdsosd -> tee -> NVJPG (live MJPEG + evidence JPEGs)
                    -> NVENC H.264 -> RTSP server :8554/live + ring buffer for event clips
@@ -25,7 +25,7 @@ Key files:
 
 - `facepipe.cpp`: the whole pipeline, enrollment (`-DFACEPIPE_ENROLL` build), `--selftest`, `--version`.
 - `web.py`: dashboard, login (PBKDF2 hash in `web_auth`), `--selftest`, `--set-password`, `--set-rtsp-password`.
-- `Makefile`, `VERSION`, `CHANGELOG.md`, `pgie_scrfd.txt`, `facepipe.env.example`.
+- `Makefile`, `VERSION`, `CHANGELOG.md`, `facepipe.env.example`.
 - `deploy/`: `install.sh` (portable install), `deploy.sh` (build, test, package, install, health check, rollback), unit templates `*.service.in`.
 - `ci/` and `.github/workflows/`: CI (scan, docs check, Python 3.6 self-test, compile against pinned JetPack headers, cppcheck, Mermaid), release on `v*.*.*` tags, deploy on the self-hosted runner.
 - `docs/`: Defend What You Ship set (ARCHITECTURE, FLOW, DECISIONS, ALTERNATIVES, THREAT, FAILURE, DATA, ASSUMPTIONS, TEST-CHECKLIST, ROLLBACK, HANDOVER, ...), `docs/bugs/`, `docs/features/`.
@@ -63,8 +63,8 @@ sh ci/scan.sh              # run before every commit
 - `nvjpegenc` crashes on NVMM input: feed it system-memory I420.
 - OpenCV imgcodecs and `nvjpegenc` cannot share a process (libjpeg ABI clash): enrollment is a separate binary.
 - `nvarguscamerasrc` needs `bufapi-version=1`; caps inside `gst_parse` strings must be `capsfilter caps="..."`.
-- With raw-tensor nvinfer, the probe must set `bInferDone`, or nvtracker drops every object.
+- The detection probe must set `bInferDone` on frames it ran, or nvtracker drops every object.
 - RTSP input must use TCP; USB webcams need `exposure_auto_priority=0` for full frame rate.
 - `cp` over a running binary fails with "Text file busy": copy beside it and rename.
-- nvinfer `interval` is changeable only in NULL or READY state.
+- nvinfer `interval` is changeable only in NULL or READY state (why detection is our own probe, D-028).
 - Do not call the log macros from inside `log_line` (recursion); library prints go only to the journal.

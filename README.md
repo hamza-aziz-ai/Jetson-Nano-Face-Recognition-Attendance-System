@@ -48,7 +48,7 @@ flowchart TB
 
 1. **Camera input.** `FACEPIPE_URI` selects an RTSP camera (forced to TCP), a video file, a USB camera (MJPEG decoded on NVJPG) or a CSI camera (Argus ISP). Decoding runs on the hardware decoders, not the CPU.
 2. **Frame thinning.** Only every Nth frame enters the pipeline (`FACEPIPE_DROP`, default 2: 15 fps from a 30 fps camera). The GPU tops out at about 19 fps of detection (D-007).
-3. **Detection.** SCRFD-10G runs at 640x384 in TensorRT FP16. A custom decoder keeps the 5 facial landmarks that alignment needs, with score 0.6 and NMS 0.4 (D-002, D-006).
+3. **Detection.** SCRFD-10G runs at 640x384 in TensorRT FP16, called from a probe: the VIC letterboxes the frame and a custom decoder keeps the 5 facial landmarks that alignment needs, with score 0.6 and NMS 0.4 (D-002, D-006). It runs on every frame while faces are around and on every 6th frame after 10 s without one; video stays at full rate (D-028).
 4. **Tracking.** The IOU tracker follows each face, so a person is recognized once per visit, not once per frame (D-004).
 5. **Attempt rule.** A track gets a recognition attempt when it is not done, nothing is pending, the face is at least 40 px wide and 8 frames have passed since its last try (D-005).
 6. **Embedding.** The face is aligned to the ArcFace 5-point template and `w600k_r50` turns it into 512 numbers, in RGB (D-008).
@@ -113,7 +113,7 @@ Who owns which part, the ports and the data locations are in [docs/ARCHITECTURE.
 | Area | What it does |
 | --- | --- |
 | Video sources | RTSP/IP cameras (forced to TCP), video files, **CSI** cameras through the Argus ISP, **USB** cameras (MJPEG decoded on NVJPG, or raw YUY2) |
-| Detection | SCRFD-10G at 640x384, TensorRT FP16, custom decoder for boxes and 5 facial landmarks, NMS |
+| Detection | SCRFD-10G at 640x384, TensorRT FP16, custom decoder for boxes and 5 facial landmarks, NMS; adaptive rate when the scene is empty |
 | Tracking | NvMultiObjectTracker (IOU): one recognition per person per visit, not per frame |
 | Recognition | Umeyama similarity alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine matching; unknown tracks are retried up to 5 times |
 | Enrollment | Drop photos in `gallery/<name>/`, run `facepipe-enroll`; the running service hot-reloads the gallery |
@@ -133,6 +133,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 | 30 fps 1080p camera, every 2nd frame processed (default) | 15.0 fps |
 | Same, with overlay, NVJPG live view and NVENC encoding | 13-15 fps |
 | SCRFD-10G 640x384, TensorRT FP16 | 55 ms per frame |
+| Empty scene, CSI 1080p, v1.0.3 (detector every frame) vs v1.1.0 (adaptive) | GPU 89-99% vs about 0% between detections; 12.2 vs 14.8-15.0 fps; detections 12/s vs 2.4/s; CPU sensor 82 vs 77 °C after 1 min |
 | ArcFace w600k_r50, batch 1, TensorRT FP16 | 48 ms per face |
 | Enrollment, 10 photos | 10 s |
 | Embedding agreement with InsightFace reference, same images | cosine 0.97-0.99 |
@@ -142,7 +143,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 
 Problems found and solved while building this, each verified on the device:
 
-- **Tracker silently dropped all faces.** With `network-type=100` (raw tensor output), `nvinfer` leaves `NvDsFrameMeta.bInferDone` unset, and `nvtracker` then ignores the frame's detections. The detection probe sets it.
+- **Tracker silently dropped all faces.** With `network-type=100` (raw tensor output), `nvinfer` left `NvDsFrameMeta.bInferDone` unset (the own detection probe of v1.1.0 sets it itself), and `nvtracker` then ignores the frame's detections. The detection probe sets it.
 - **Embedding mismatch traced to a reference server bug.** Comparing against an FP32 ONNX run of the same crop showed the reference InsightFace-REST TensorRT backend fed ArcFace BGR instead of RGB (cosine 0.935 vs 1.000). Reported upstream in the companion project and fixed there; this pipeline uses RGB.
 - **`nvjpegenc` crash.** On JetPack 4.6 it segfaults on DeepStream `NvBufSurface` buffers; frames are converted to system-memory I420 first.
 - **libjpeg ABI clash.** OpenCV `imgcodecs` and the L4T JPEG library cannot share a process ("JPEG parameter struct mismatch: library thinks size is 584, caller expects 728"), so the live binary avoids `imgcodecs` and enrollment is a separate binary.
@@ -218,7 +219,6 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | --- | --- |
 | `facepipe.cpp` | DeepStream pipeline, SCRFD decoding, alignment, recognition worker, video outputs, RTSP server, enrollment (`-DFACEPIPE_ENROLL`) |
 | `web.py` | Dashboard, CSV export, live MJPEG view, evidence files, login management |
-| `pgie_scrfd.txt` | `nvinfer` configuration for the detector |
 | `facepipe.env.example` | All runtime settings |
 | `deploy/install.sh` | One-step install on a Nano: build, engines, self-tests, `facepipe.env`, systemd services for the current user and folder |
 | `deploy/*.service.in` | systemd unit templates (filled in by `install.sh`) |

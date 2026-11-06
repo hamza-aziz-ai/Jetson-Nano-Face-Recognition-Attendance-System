@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.0.3 (2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.1.0 (2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -26,13 +26,13 @@ flowchart TD
   classDef error fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
 ```
 
-Key: frame thinning `drop_probe`; detection `pgie_probe` and `decode_scrfd`; landmarks `pack_kps`/`unpack_kps`; attempt rule `want_attempt`; alignment `umeyama` and `align`; probe `tracker_probe` (all in `facepipe.cpp`); detector config `pgie_scrfd.txt`; tracker `tracker.yml` (IOU).
+Key: frame thinning `drop_probe`; detection `detect_probe` (`detect_due`, `det_prepare`) and `decode_scrfd`; landmarks `pack_kps`/`unpack_kps`; attempt rule `want_attempt`; alignment `umeyama` and `align`; probe `tracker_probe` (all in `facepipe.cpp`); detector config `pgie_scrfd.txt`; tracker `tracker.yml` (IOU).
 
 1. The frame is decoded by NVDEC (RTSP, file), NVJPG (USB MJPEG) or the ISP (CSI).
 2. `drop_probe` on the nvstreammux sink keeps every Nth frame (`FACEPIPE_DROP`, default 2).
 3. nvstreammux batches it; nvvideoconvert makes RGBA in GPU memory.
-4. nvinfer runs SCRFD on a 640x384 letterbox (padded right and bottom) and attaches 9 raw output tensors.
-5. `pgie_probe` decodes scores, boxes and 5 landmarks at strides 8, 16 and 32 (score 0.6 or more, NMS at IoU 0.4), adds one object per face with landmarks in `misc_obj_info`, and sets `bInferDone` so the tracker accepts them.
+4. `detect_probe` decides whether this frame gets detection (`detect_due`: every frame while a face was seen in the last 10 s, else every 6th). If not, the frame goes on with `bInferDone` unset and the tracker only tracks it.
+5. `det_prepare` letterboxes the frame to 640x384 on the VIC (padded right and bottom) and normalizes it; SCRFD runs in TensorRT; `decode_scrfd` decodes scores, boxes and 5 landmarks at strides 8, 16 and 32 (score 0.6 or more, NMS at IoU 0.4), adds one object per face with landmarks in `misc_obj_info`, and sets `bInferDone` so the tracker accepts them.
 6. The IOU tracker gives each face a track ID after a short probation.
 7. `want_attempt`: an attempt is due if the track is not done, nothing is pending, the face is at least 40 px wide, and 8 frames have passed since the last try.
 8. Otherwise only the label is drawn (amber while recognizing, green name, red Unknown).

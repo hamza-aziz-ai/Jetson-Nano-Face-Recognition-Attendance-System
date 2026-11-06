@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-06
+
+### Added
+
+- Adaptive detection (D-028): the face detector runs on every frame while faces are around and on every 6th frame after 10 s without one (`FACEPIPE_IDLE_AFTER`, `FACEPIPE_IDLE_STEP`; `FACEPIPE_IDLE_AFTER=0` turns it off). Live view, RTSP and clips stay at full frame rate. Empty scene on the CSI camera: GPU from 89-99% to about 0% between detections, 14.8-15.0 fps instead of 12.2, about 5 °C cooler within a minute.
+- `status.json` reports `det_fps` (detections per second); the minute log line includes it, and the switches between idle and active are logged.
+
+### Changed
+
+- The detector is called from a probe with its own TensorRT engine (the same engine file as enrollment) and a VIC letterbox, instead of `nvinfer`; `pgie_scrfd.txt` is no longer used or shipped.
+
+### Fixed
+
+- The first status line after start showed an impossible frame rate (no measured interval yet).
+
 ## [1.0.3] - 2026-11-06
 
 ### Added
@@ -96,7 +111,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.0.0...v1.0.1
