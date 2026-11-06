@@ -122,3 +122,10 @@ v1.5.0 check (2026-11-07):
 | --- | --- | --- |
 | Redesign in a browser | the site in a local Python 3.6 container with sample data, viewed in Chrome | Overview, People, Cameras, System and the registration page render with the sidebar, cards and forms; one fault found and fixed (the registration background repeated on short pages) |
 | Web self-test | `python3 web.py --selftest` on the Nano | ok |
+
+v1.6.0 checks on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Device health readings | `device_health()` on the Nano | AO 77, CPU 71, GPU 69, PLL 70, PMIC 50 °C; cores 34/31/17/21 %; CPU 1224 MHz; GPU 0 % at 921 MHz; fan 63 % (no rpm sensor); 1440 of 3963 MB available; swap 406 MB used; level ok |
+| Health API and panel | `python3 web.py --selftest` | ok: 4 panel cards from `/api/health`, 401 without login |

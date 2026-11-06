@@ -60,7 +60,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
 | 🖥️ **Website** | Overview, Live, Attendance, People and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
-| ⚙️ **Operations** | Frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |
+| ⚙️ **Operations** | Device health on the website (temperatures, CPU/GPU load, fan, memory) with warnings; frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |
 
 ## System Design
 

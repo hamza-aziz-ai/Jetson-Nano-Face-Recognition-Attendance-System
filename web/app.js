@@ -42,6 +42,14 @@
     drop.addEventListener("drop", function (e) { fin.files = e.dataTransfer.files; show(); });
   }
 
+  // System page: device health every 5 s, so a problem shows up while you look at the page
+  var hp = document.getElementById("health");
+  if (hp) setInterval(function () {
+    if (document.hidden) return;
+    fetch("/api/health", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.json(); }).then(function (j) { hp.innerHTML = j.html; }).catch(function () {});
+  }, 5000);
+
   // sortable tables
   document.querySelectorAll("table[data-sort]").forEach(function (t) {
     t.querySelectorAll("th[data-k]").forEach(function (th) {

@@ -11,6 +11,8 @@ Added 2026-11-06 at the owner's request ("Do not put everything in just one webp
 - **Confirmations:** the site's own dialog (an HTML `<dialog>`), not the browser's pop-up. Pausing the live view keeps the last frame, labelled Paused.
 - **Referrer policy:** `same-origin`, so the browser sends this site's origin with its own forms (needed by the same-origin check) and nothing to other sites.
 - **Pictures:** a person's avatar is `gallery/<name>/profile.jpg` (or `.png`) if present, otherwise their first photo by name. A profile picture in the folder is also an enrollment photo the next time `facepipe-enroll` runs.
+- **Device health (v1.6):** temperatures (`/sys/devices/virtual/thermal`), per-core CPU load (`/proc/stat`), GPU load (`/sys/devices/gpu.0/load`), clocks, fan PWM (`/sys/devices/pwm-fan`; no speed sensor on the owner's fan), memory and swap (`/proc/meminfo`), uptime; no root needed. The power rails (INA3221) are readable only by root, so power is left out.
+- **Client address:** `client_ip()` uses `CF-Connecting-IP` only when the connection comes from this host (cloudflared); a LAN client cannot set it.
 - **Messages:** the System page shows fixed messages chosen by a key in the URL; no request text is reflected into a page.
 
 Proof: `python3 web.py --selftest` starts a real server on a free port and checks login, all five pages with their CSP, HTML escaping of a hostile name, Range, and that a POST is refused without `Origin`, with a wrong token, from another site, with an unknown action and when too large. On the Nano, a second instance on port 8001 with the real data served all pages, and its Restart button restarted the live service through the sudoers rule (clean stop in 3 s, active again). See TEST-CHECKLIST.
