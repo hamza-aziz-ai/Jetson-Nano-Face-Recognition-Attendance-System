@@ -4,8 +4,8 @@ Snapshot: **2026-11-06 21:45 IST**. Volatile state; verify before acting (see "S
 
 ## Versions
 
-- `main` HEAD: release commit of v1.0.2 (`c4d0672`) plus agent-file commits. Released: v1.0.0, v1.0.1, v1.0.2 (GitHub releases with assets and SHA256SUMS).
-- **The device still runs v1.0.1.** The v1.0.2 deploy rolled back automatically: the new process stalled opening the CSI camera, and `deploy.sh` waited only 60 s, less than the watchdog (60 s) plus systemd restart (10 s). See `docs/bugs/csi-start-stall.md`.
+- `main`: v1.0.3 (`92eaa15`) plus docs. Released: v1.0.0 to v1.0.3 (GitHub releases with assets and SHA256SUMS).
+- The device runs v1.0.3 (deployed 2026-11-06 21:42 IST after a manual nvargus-daemon restart). v1.0.2 was never deployed (rolled back).
 
 ## Device
 
@@ -15,7 +15,7 @@ Snapshot: **2026-11-06 21:45 IST**. Volatile state; verify before acting (see "S
 
 ## In progress
 
-1. **v1.0.3 (this commit):** daily log files in the owner's layout (D-030), clean bounded SIGTERM shutdown and watchdog fix (D-029), deploy health on the current `MainPID` with advancing frames, clip finalization result logged, 12-hour times on the web page. Verified on the Nano in a test instance: self-tests, log file format, clean stop in 2.7 s. Next: CI, tag, deploy with `deploy.sh`, then long-run CSI restart tests.
+1. **v1.0.3 released and deployed (healthy after 14 s, 14 fps).** Contents: daily log files in the owner's layout (D-030), clean bounded SIGTERM shutdown and watchdog fix (D-029), deploy health on the current `MainPID` with advancing frames, clip finalization result logged, 12-hour times on the web page. Verified on the Nano in a test instance: self-tests, log file format, clean stop in 2.7 s. CSI stall cause found: a killed camera process wedges nvargus-daemon (`SCF: Error Timeout`, then `InvalidState` for every client) until the daemon is restarted (docs/bugs/csi-start-stall.md). Still to do: restart after 20 min and after hours of CSI capture.
 2. **Empty clips (owner's report):** five 0-byte `*_clip.mp4` files today (four unknown events, one known), one 23 KB for 4.2 s. v1.0.3 logs how each clip ended; reproduce after deploying (owner in front of the camera; a high `FACEPIPE_MATCH` makes every face unknown).
 3. **v1.1.0: adaptive detection (D-028)**, agreed with Codex: own SCRFD probe replacing nvinfer; idle after 10 s without faces, every 6th frame; accept only with measured smooth 15 fps outputs.
 

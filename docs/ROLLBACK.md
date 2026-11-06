@@ -30,3 +30,7 @@ Last good commit: see `git log`; every commit on `main` has been deployed and ru
 ## Data
 
 Attendance events, snapshots and the gallery are files under `<app_dir>/data`; back them up by copying the folder. There is no migration step to undo.
+
+## CSI camera gives no frames after a stop or crash
+
+If the facepipe log shows `end of stream` right after start, or `watchdog: no frames`, and `journalctl -u nvargus-daemon` shows `SCF: Error Timeout` or `Error InvalidState`, the camera daemon is wedged: `sudo systemctl stop facepipe && sudo systemctl restart nvargus-daemon && sudo systemctl start facepipe`.
