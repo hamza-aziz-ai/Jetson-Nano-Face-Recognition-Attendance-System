@@ -1218,13 +1218,18 @@ static int selftest() {
   int ia = IDLE_AFTER, is = IDLE_STEP;  // detection policy: active until IDLE_AFTER s without a face, then every IDLE_STEP
   IDLE_AFTER = 10; IDLE_STEP = 6;
   unsigned long long n = 0;
-  for (int i = 0; i < 20; i++) assert(detect_due(100, 95, n));  // a face 5 s ago: every frame
-  int due = 0;
-  for (int i = 0; i < 60; i++) due += detect_due(100, 80, n);   // 20 s ago: every 6th
-  assert(due == 10);
-  assert(detect_due(100, 100, n) && n == 0);                    // a new face: every frame again
+  auto count = [&n](int frames, long now, long last_face) {
+    int due = 0;
+    for (int i = 0; i < frames; i++) due += detect_due(now, last_face, n);
+    return due;
+  };
+  int active = count(20, 100, 95);  // a face 5 s ago: every frame
+  int idle = count(60, 100, 80);    // 20 s ago: every 6th
+  int back = count(1, 100, 100);    // a new face: every frame again
+  assert(active == 20 && idle == 10 && back == 1 && n == 0);
   IDLE_AFTER = 0;
-  for (int i = 0; i < 20; i++) assert(detect_due(1000, 0, n));  // idle mode off
+  int off = count(20, 1000, 0);     // idle mode off
+  assert(off == 20);
   IDLE_AFTER = ia; IDLE_STEP = is;
   printf("selftest ok\n");
   return 0;
