@@ -88,6 +88,10 @@ Problems found and solved while building this, each verified on the device:
 | USB camera input | Verified: Logitech C270, MJPEG 1280x720 decoded on NVJPG, enrolled person recognized |
 | CSI camera input | Implemented; pipeline builds and fails cleanly without a camera, hardware test pending |
 
+## Documentation
+
+Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITECTURE.md), [flow of one face](docs/FLOW.md), [decisions](docs/DECISIONS.md) and [alternatives](docs/ALTERNATIVES.md), [threat model](docs/THREAT.md), [failure map](docs/FAILURE.md), [data](docs/DATA.md), [assumptions](docs/ASSUMPTIONS.md), [test checklist](docs/TEST-CHECKLIST.md), [rollback](docs/ROLLBACK.md), [handover](docs/HANDOVER.md), and one write-up per [bug](docs/bugs/) and [feature](docs/features/).
+
 ## Getting started
 
 ### Requirements
