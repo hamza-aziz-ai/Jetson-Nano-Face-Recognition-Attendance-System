@@ -25,10 +25,10 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 
 ## Owner decisions 2026-11-07 (D-034)
 
-- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (v1.4, built in PR feat/cameras), then two RTSP cameras at once, then video upload, then a full enterprise-style redesign of the website (owner, 2026-11-07: after all features).
+- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (v1.4, built in PR feat/cameras), then (owner moved it forward) the website redesign v1.5.0; still to do: two RTSP cameras at once, then video upload.
 - Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
 
-## Redesign backlog (owner, 2026-11-07: "fix these theme and UI issues when we start working on the enterprise look")
+## Redesign (owner, 2026-11-07), done in v1.5.0 (PR feat/web-redesign); the backlog below was addressed
 
 - Registration page: the form uses half the card width; the file input is the browser's plain "Choose Files"; the consent checkbox and text look unaligned; no photo previews before sending.
 - People page: cards were cramped (fixed in v1.4.1); generally tighten spacing, typography and button styles across pages.

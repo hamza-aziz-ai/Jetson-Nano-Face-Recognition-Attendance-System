@@ -216,9 +216,17 @@ def hms(iso):
 WEB_DIR = os.path.join(HERE, "web")
 STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "logo.svg": "image/svg+xml"}
 LAYOUT = string.Template(open(os.path.join(WEB_DIR, "layout.html"), encoding="utf-8").read())
+PUBLIC = string.Template(open(os.path.join(WEB_DIR, "public.html"), encoding="utf-8").read())
+ICONS = {  # 24x24 stroke icons for the sidebar (inline SVG: no files, no fonts)
+    "overview": "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+    "live": "M23 7l-7 5 7 5zM3 5h11a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z",
+    "attendance": "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 2v4M8 2v4M3 10h18M8 15l2.5 2.5L16 13",
+    "people": "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+    "cameras": "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "system": "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"}
 PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
          ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("system", "/system", "System")]
-CSP = ("default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
+CSP = ("default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 FLASH = {  # fixed messages only: the query string never reflects text into the page
     "started": ("ok", "Recognition service started."), "stopped": ("ok", "Recognition service stopped. It stays stopped, also across updates, until you start it."),
@@ -239,8 +247,8 @@ esc = html.escape
 
 def layout(page_id, title, body, flash="", refresh=False):
     st = status()
-    nav = "".join("<a href='%s'%s>%s</a>" % (href, " aria-current='page'" if pid == page_id else "", label)
-                  for pid, href, label in PAGES)
+    nav = "".join("<a href='%s'%s><svg viewBox='0 0 24 24' aria-hidden='true'><path d='%s'/></svg>%s</a>"
+                  % (href, " aria-current='page'" if pid == page_id else "", ICONS[pid], label) for pid, href, label in PAGES)
     msg = ""
     if flash in FLASH:
         kind, text = FLASH[flash]
@@ -815,8 +823,7 @@ SHOWN = {}  # one-time display of a new invitation link: nonce -> (link, expires
 
 def public_page(title, body):
     """pages for people without the admin login (registration): no navigation, no device status"""
-    return LAYOUT.substitute(title=esc(title), site=esc(SITE), page="register", refresh="0", nav="", state="", detail="",
-                             flash="", body=body, version=esc(VERSION), now=hms(datetime.datetime.now().isoformat()))
+    return PUBLIC.substitute(title=esc(title), site=esc(SITE), body=body, version=esc(VERSION))
 
 
 def page_register(invite, token="", error="", name=""):
@@ -835,9 +842,13 @@ def page_register(invite, token="", error="", name=""):
 <div id="regerr" class="flash bad"%s role="alert">%s</div>
 <section><form id="regform" class="body form" method="post" action="/register" enctype="multipart/form-data">
 <input type="hidden" name="t" value="%s">%s
-<label class="field"><span>Photos (%d to %d)</span><input name="photos" type="file" accept="image/jpeg,image/png" multiple required>
-<small class="muted">Clear photos of your face only, good light, no sunglasses: one from the front, one turned slightly left, one slightly right. Large photos are shrunk on your device before upload.</small></label>
-<label class="check"><input type="checkbox" name="consent" value="yes" required> <span>%s</span></label>
+<div class="field"><span>Photos (%d to %d)</span>
+<label class="drop" id="drop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+<span><b>Choose photos</b> or drop them here</span><small class="muted">JPEG or PNG; shrunk on your device before sending</small>
+<input name="photos" type="file" accept="image/jpeg,image/png" multiple required></label>
+<div class="previews" id="previews"></div>
+<small class="muted">Clear photos of your face only, in good light, without sunglasses: one from the front, one turned slightly left, one slightly right.</small></div>
+<label class="check"><input type="checkbox" name="consent" value="yes" required><span>%s</span></label>
 <button class="btn primary" type="submit">Send registration</button>
 </form></section>""" % ("Update your photos" if update else "Registration", who, "" if error else " hidden", esc(error),
                         esc(token), name_field, MIN_PHOTOS, MAX_PHOTOS, esc(CONSENT_TEXT))

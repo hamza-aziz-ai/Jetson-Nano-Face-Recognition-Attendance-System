@@ -115,3 +115,10 @@ v1.4.0 checks on the Nano (2026-11-07):
 | Camera from the file | test instance with `FACEPIPE_CAMERAS` and no camera argument | file source: "camera chosen on the website, 1920x1080"; USB: 1280x720, 9.4 fps |
 | RTSP test button | `probe_rtsp` | phone stream: `H.264 (High Profile)`; no camera at the address: "the stream could not be opened" |
 | USB list | `video_devices()` | `/dev/video1 UVC Camera (046d:0825)`; CSI sensor (vi-output) left out |
+
+v1.5.0 check (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Redesign in a browser | the site in a local Python 3.6 container with sample data, viewed in Chrome | Overview, People, Cameras, System and the registration page render with the sidebar, cards and forms; one fault found and fixed (the registration background repeated on short pages) |
+| Web self-test | `python3 web.py --selftest` on the Nano | ok |
