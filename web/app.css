@@ -48,10 +48,10 @@ meter{width:64px;height:8px;vertical-align:middle;margin-right:.35rem}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.9rem;padding:1rem 1.15rem}
 figure{margin:0;text-align:center;font-size:.82rem;color:var(--muted)}
 figure img{width:100%;aspect-ratio:1;border-radius:10px;object-fit:cover;background:var(--line);display:block;margin-bottom:.3rem}
-.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.9rem;padding:1rem 1.15rem}
-.person{border:1px solid var(--line);border-radius:12px;padding:.9rem;display:flex;gap:.8rem;align-items:center}
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:.9rem;padding:1rem 1.15rem}
+.person{border:1px solid var(--line);border-radius:12px;padding:.9rem;display:grid;grid-template-columns:56px 1fr;gap:.7rem .9rem;align-items:center}
 .person .av{width:56px;height:56px}.person .n{font-weight:650}.person .m{color:var(--muted);font-size:.85rem}
-.badge{display:inline-block;font-size:.75rem;font-weight:650;padding:.1rem .5rem;border-radius:999px;margin-top:.25rem}
+.badge{display:inline-block;white-space:nowrap;font-size:.75rem;font-weight:650;padding:.1rem .5rem;border-radius:999px;margin-top:.25rem}
 .badge.in{color:var(--ok);background:var(--okbg)}.badge.out{color:var(--muted);background:#eef0f4}
 .empty{padding:1.2rem 1.15rem;color:var(--muted)}.muted{color:var(--muted)}
 .video{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#0b0f19;border-radius:0}
@@ -88,7 +88,7 @@ section.invite{border-color:var(--accent)}
 .sub-acts{margin-left:auto;display:flex;gap:.5rem}.sub-acts form,.person-acts form{margin:0}
 .thumbs{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.7rem}.thumbs img{width:96px;height:96px;object-fit:cover;border-radius:10px;background:var(--line)}
 .badge.bad{color:var(--bad);background:var(--badbg)}.bad-text{color:var(--bad)!important}
-.person .grow{flex:1;min-width:0}.person-acts{display:flex;flex-direction:column;gap:.35rem}.person-acts .btn{font-size:.82rem;padding:.3rem .6rem}
+.person .grow{min-width:0}.person-acts{grid-column:1/-1;display:flex;gap:.45rem;padding-top:.6rem;border-top:1px solid var(--line)}.person-acts .btn{font-size:.82rem;padding:.3rem .6rem}
 .stage{position:relative;background:#0b0f19}
 .tag{position:absolute;top:.8rem;left:.8rem;background:rgba(15,27,51,.85);color:#fff;font-weight:650;font-size:.85rem;
 padding:.25rem .7rem;border-radius:999px}
