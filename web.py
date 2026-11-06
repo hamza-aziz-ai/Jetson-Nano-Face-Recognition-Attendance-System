@@ -429,7 +429,9 @@ def page_system(csrf, flash):
         button("restart", "Restart", "", "Video and recognition stop for a few seconds, then start again.") if active == "active" else "",
         button("stop", "Stop", "danger", "No attendance is recorded until it is started again. It stays stopped across updates.")
         if active == "active" else ""])
-    body = """<h1>System</h1><p class="sub">Service control, device status and recent log lines.</p>
+    body = """<h1>System</h1><p class="sub">Device health, service control and recent log lines.</p>
+<section aria-labelledby="h-health"><div class="sh"><h2 id="h-health">Device health</h2><span class="count">refreshes every 5 s</span></div>
+<div id="health">%s</div></section>
 <section aria-labelledby="h-svc"><div class="sh"><h2 id="h-svc">Recognition service</h2><span class="pill %s">%s</span></div>
 <dl class="kv"><dt>systemd state</dt><dd>%s</dd><dt>Wanted state</dt><dd>%s</dd><dt>Frame rate</dt><dd>%s</dd>
 <dt>Detections per second</dt><dd>%s</dd><dt>Frames processed</dt><dd>%s</dd><dt>Camera</dt><dd>%s</dd></dl>
@@ -440,11 +442,110 @@ def page_system(csrf, flash):
 <dt>Last update check</dt><dd>%s</dd></dl></section>
 <section aria-labelledby="h-log" class="noprint"><div class="sh"><h2 id="h-log">Recent log</h2><span class="count">facepipe.log</span></div>
 <pre class="log">%s</pre></section>""" % (
-        st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
+        health_html(device_health()), st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
         "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
         st.get("frames", "&ndash;"), esc(camera_label()), buttons, esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
         esc(disk(REC_DIR)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
     return layout("system", "System", body, flash=flash)
+
+
+# ---------- device health (owner: "temperature, fan, memory, CPU/GPU load, so I can shut the service remotely") ----------
+# Read from /sys and /proc without privileges. Jetson Nano paths; on other boards missing values are left out.
+WARN_C, HOT_C = 80, 90            # the Nano throttles near 97 C and shuts down a few degrees above
+LOW_MEM_MB = 400
+_cpu_prev = {}
+
+
+def _read(path, cast=str):
+    try:
+        with open(path) as f:
+            return cast(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _cpu_loads():
+    """per-core busy % since the previous call (or over 0.3 s on the first)"""
+    def snap():
+        out = {}
+        for line in open("/proc/stat"):
+            if line.startswith("cpu") and line[3].isdigit():
+                p = line.split()
+                v = list(map(int, p[1:8]))
+                out[p[0]] = (sum(v), v[3] + v[4])  # total, idle + iowait
+        return out
+    global _cpu_prev
+    if not _cpu_prev:
+        _cpu_prev = snap()
+        time.sleep(0.3)
+    now = snap()
+    loads = []
+    for k in sorted(now, key=lambda c: int(c[3:])):
+        t0, i0 = _cpu_prev.get(k, now[k])
+        dt, di = now[k][0] - t0, now[k][1] - i0
+        loads.append(round(100.0 * (dt - di) / dt) if dt > 0 else 0)
+    _cpu_prev = now
+    return loads
+
+
+def device_health():
+    h = {"temps": {}}
+    for z in sorted(glob.glob("/sys/devices/virtual/thermal/thermal_zone*")):
+        name, t = _read(z + "/type"), _read(z + "/temp", int)
+        if name and t is not None and name not in ("thermal-fan-est",):
+            h["temps"][name.replace("-therm", "")] = round(t / 1000.0, 1)
+    mem = {}
+    for line in open("/proc/meminfo"):
+        k, v = line.split(":", 1)
+        mem[k] = int(v.split()[0]) // 1024
+    h["mem"] = {"total": mem.get("MemTotal"), "available": mem.get("MemAvailable"), "swap_total": mem.get("SwapTotal"),
+                "swap_used": (mem.get("SwapTotal") or 0) - (mem.get("SwapFree") or 0)}
+    h["cpu"] = _cpu_loads()
+    h["cpu_mhz"] = (_read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", int) or 0) // 1000
+    gpu = _read("/sys/devices/gpu.0/load", int)
+    h["gpu"] = None if gpu is None else round(gpu / 10.0)
+    h["gpu_mhz"] = (_read("/sys/devices/gpu.0/devfreq/57000000.gpu/cur_freq", int) or 0) // 1000000
+    pwm = _read("/sys/devices/pwm-fan/target_pwm", int)
+    h["fan"] = None if pwm is None else {"pct": round(100.0 * pwm / 255), "rpm": _read("/sys/devices/pwm-fan/rpm_measured", int)}
+    up = _read("/proc/uptime")
+    h["uptime_h"] = round(float(up.split()[0]) / 3600, 1) if up else None
+    hottest = max(h["temps"].values()) if h["temps"] else 0
+    h["level"] = "bad" if hottest >= HOT_C else "warn" if hottest >= WARN_C or (h["mem"]["available"] or 1e9) < LOW_MEM_MB else "ok"
+    return h
+
+
+def health_html(h):
+    """the Device health panel; app.js refreshes the same markup from /api/health every 5 s"""
+    def lvl_t(c):
+        return "bad" if c >= HOT_C else "warn" if c >= WARN_C else "ok"
+
+    def meter(pct, lvl):
+        return "<span class='bar %s'><i class='w%d'></i></span>" % (lvl, max(0, min(100, int(round(pct / 5.0) * 5))))
+    temps = "".join("<div class='hrow'><span>%s</span><b class='%s-text'>%.0f &deg;C</b></div>" % (esc(k), lvl_t(v), v)
+                    for k, v in sorted(h["temps"].items(), key=lambda kv: -kv[1]))
+    cpu = "".join("<div class='hrow'><span>Core %d</span>%s<b>%d%%</b></div>" % (i, meter(v, "ok" if v < 85 else "warn"), v)
+                  for i, v in enumerate(h["cpu"]))
+    m = h["mem"]
+    used = (m["total"] or 0) - (m["available"] or 0)
+    mem_pct = 100.0 * used / m["total"] if m["total"] else 0
+    fan = h["fan"]
+    fan_txt = ("%d%% power%s" % (fan["pct"], ", %d rpm" % fan["rpm"] if fan.get("rpm") else " (no speed sensor)")) if fan else "no fan control"
+    banner = {"bad": "<div class='flash bad'>The device is very hot. Stop recognition on this page if it stays like this.</div>",
+              "warn": "<div class='flash warn'>The device is warm or short of memory; keep an eye on it.</div>"}.get(h["level"], "")
+    return """%s<div class="health">
+<div class="hcard"><div class="k">Temperature</div>%s</div>
+<div class="hcard"><div class="k">CPU %s MHz</div>%s</div>
+<div class="hcard"><div class="k">GPU %s MHz</div><div class='hrow'><span>Load</span>%s<b>%s</b></div>
+ <div class="k gap">Fan</div><div class='hrow'><span>%s</span></div></div>
+<div class="hcard"><div class="k">Memory</div><div class='hrow'><span>Used</span>%s<b>%.1f / %.1f GB</b></div>
+ <div class='hrow'><span>Available</span><b class='%s-text'>%d MB</b></div><div class='hrow'><span>Swap used</span><b>%d / %d MB</b></div>
+ <div class="k gap">Up for</div><div class='hrow'><span>%s hours</span></div></div>
+</div>""" % (banner, temps or "<div class='hrow'><span>not available</span></div>", h["cpu_mhz"] or "?", cpu,
+             h["gpu_mhz"] or "?", meter(h["gpu"] or 0, "ok" if (h["gpu"] or 0) < 90 else "warn"),
+             "%d%%" % h["gpu"] if h["gpu"] is not None else "?", fan_txt,
+             meter(mem_pct, "ok" if (m["available"] or 0) >= LOW_MEM_MB else "warn"), used / 1024.0, (m["total"] or 0) / 1024.0,
+             "ok" if (m["available"] or 0) >= LOW_MEM_MB else "warn", m["available"] or 0, m["swap_used"], m["swap_total"] or 0,
+             h["uptime_h"] if h["uptime_h"] is not None else "?")
 
 
 # ---------- service control (D-033): exact sudoers rule for start/stop/restart of facepipe only ----------
@@ -1193,12 +1294,21 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     timeout = 30  # a client that stops sending is dropped
 
+    def client_ip(self):
+        """the visitor's address: behind the Cloudflare Tunnel every request comes from cloudflared on this host, so the
+        CF-Connecting-IP header names the visitor; it is trusted only on connections from this host"""
+        ip = self.client_address[0]
+        cf = self.headers.get("CF-Connecting-IP", "")
+        if ip in ("127.0.0.1", "::1") and cf and len(cf) <= 45 and re.match(r"^[0-9A-Fa-f:.]+$", cf):
+            return cf
+        return ip
+
     def user(self):
         """the logged-in user name, or None. Failed attempts are counted per client and throttled before hashing."""
         h = self.headers.get("Authorization", "")
         if not h.startswith("Basic "):
             return None
-        ip, now = self.client_address[0], time.time()
+        ip, now = self.client_ip(), time.time()
         fails = [t for t in self.server.fails.get(ip, []) if now - t < FAIL_WINDOW]
         if len(fails) >= FAIL_LIMIT:
             return None
@@ -1369,6 +1479,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.html_page(page_system(csrf_token(user), q.get("msg", [""])[0]))
         if url.path == "/live.mjpg":
             return self.live()
+        if url.path == "/api/health":  # the panel's markup, so the page needs no template of its own
+            return self.send(200, json.dumps({"html": health_html(device_health())}), "application/json")
         if url.path == "/api/status":
             return self.send(200, json.dumps(status()), "application/json")
         if url.path.startswith("/rec/") and REC_RE.match(url.path[5:]):
@@ -1388,7 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
     def register_post(self):
         """public: name, photos and consent for a valid invitation"""
         fetch = self.headers.get("X-Requested-With") == "fetch"
-        ip, now = self.client_address[0], time.time()
+        ip, now = self.client_ip(), time.time()
         hits = [t for t in self.server.reg_hits.get(ip, []) if now - t < 3600]
         n = int(self.headers.get("Content-Length") or 0)
 
@@ -1434,7 +1546,7 @@ class Handler(BaseHTTPRequestHandler):
         form = parse_qs(self.rfile.read(n).decode(errors="replace"))
         token = form.get("csrf", [""])[0]
         if not self.same_origin() or not hmac.compare_digest(token, csrf_token(user)):
-            LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_address[0]))
+            LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_ip()))
             back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras") else "system")
             return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
@@ -1476,7 +1588,7 @@ class Handler(BaseHTTPRequestHandler):
         pass  # no access log (the page polls every few seconds); failed logins and errors are logged
 
     def log_error(self, fmt, *args):
-        LOG.write("ERROR", "%s: %s" % (self.client_address[0], fmt % args))
+        LOG.write("ERROR", "%s: %s" % (self.client_ip(), fmt % args))
 
 
 class Server(socketserver.ThreadingMixIn, HTTPServer):
@@ -1555,6 +1667,8 @@ def selftest_checks():
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
     assert service_action("rm -rf") == "denied" and camera_label() in camera_label()
     assert csrf_token("a") == csrf_token("a") != csrf_token("b")
+    h = device_health()  # whatever this machine exposes; the panel must render either way
+    assert "Temperature" in health_html(h) and h["level"] in ("ok", "warn", "bad") and isinstance(h["cpu"], list)
     selftest_http()
     print("selftest ok")
 
@@ -1597,6 +1711,7 @@ def selftest_http():
         assert code == 200 and "script-src 'self'" in hd.get("Content-Security-Policy", ""), (p, code)
         assert b"aria-current='page'" in body and b"<script>x" not in body, p
     assert b"&lt;script&gt;x&lt;/script&gt;" in get("/attendance")[2]
+    assert json.loads(get("/api/health")[2].decode())["html"].count("hcard") == 4 and get("/api/health", auth=None)[0] == 401
     assert get("/attendance?date=2026-02-30")[0] == 400 and get("/csv?date=../x")[0] == 400
     code, hd, body = get("/static/app.js", headers={"Range": "bytes=0-9"})
     assert code == 206 and len(body) == 10 and hd["Content-Range"].startswith("bytes 0-9/")

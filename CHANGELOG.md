@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-07
+
+### Added
+
+- Device health on the System page (owner: "temperature, fan, memory, CPU/GPU load, so I can shut the service remotely"): temperature per zone, per-core CPU load and clock, GPU load and clock, fan power, memory and swap, uptime; refreshes every 5 s (`/api/health`); a warning above 80 °C or under 400 MB free memory, an alert above 90 °C.
+- Behind a Cloudflare Tunnel the visitor's address comes from `CF-Connecting-IP`, trusted only on connections from this host (cloudflared), so login lockout and the registration rate limit apply per visitor, not to everyone at once.
+
 ## [1.5.0] - 2026-11-07
 
 ### Changed
@@ -196,7 +203,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.3.0...v1.4.0
