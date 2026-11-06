@@ -383,14 +383,14 @@ def page_attendance(day, today):
 
 
 def camera_label():
-    """the camera from facepipe.env, without credentials"""
-    uri = ""
+    """the camera facepipe uses, without credentials: data/cameras.active (chosen on the Cameras page) over facepipe.env"""
     try:
-        for line in open(os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "facepipe.env"), encoding="utf-8"):
-            if line.startswith("FACEPIPE_URI="):
-                uri = line.split("=", 1)[1].strip()
-    except OSError:
-        pass
+        uri = open(CAM_ACTIVE, encoding="utf-8").read().split()[0]
+    except (OSError, IndexError):
+        uri = env_uri()
+    for c in load_cameras()["rtsp"] if RTSP_RE.match(uri) else []:
+        if c["url"] == uri:
+            return "%s (network camera at %s)" % (c["name"], urlparse(uri).hostname or "?")
     if uri.startswith("csi:"):
         return "CSI camera, sensor %s" % uri[4:]
     if uri.startswith("usb:"):
@@ -1831,6 +1831,9 @@ def selftest_cameras(get, host):
     assert oct(os.stat(CAM_JSON).st_mode & 0o777) == "0o600"
     page = get("/cameras")[2]
     assert b"topsecret" not in page and b"Gate" in page and "\u2022".encode() in page
+    write_private(CAM_ACTIVE, "rtsp://admin:topsecret@cam:554/s 1280 720\n")  # the System page names the camera in use
+    assert camera_label() == "Gate (network camera at cam)", camera_label()
+    os.remove(CAM_ACTIVE)
     cid = cfg["rtsp"][0]["id"]
     assert get("/cameras/toggle", headers=hd, data=("csrf=%s&id=%s" % (tok, cid)).encode())[1]["Location"] == "/cameras?msg=cam_saved_inactive"
     assert not load_cameras()["rtsp"][0]["enabled"]
