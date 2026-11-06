@@ -135,3 +135,10 @@ v1.6.1 check on the Nano (2026-11-07):
 | Check | Command | Result |
 | --- | --- | --- |
 | Event right after start | test instance on a 1280x720 video that starts with a face | before: "event without a clip: the video encoder has not started yet", `"clip": ""`; after: "waiting for the video encoder's first keyframe", clip saved (2.6 MB, 5.4 s) and linked to the event |
+
+v1.7.0 check on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Matching file | test instance with `metric=l2`, `l2=0.90` in `matching.conf` | startup log: "match L2 <= 0.90" |
+| Out-of-range value | `python3 web.py --selftest` | L2 2.0 refused, nothing written; selftest ok |
