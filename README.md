@@ -160,7 +160,7 @@ Problems found and solved while building this, each verified on the device:
 | NVJPG live frames, NVENC encoding | Verified (encoders running in the service) |
 | Event clips and full-frame evidence, RTSP playback | Implemented; end-to-end test pending |
 | USB camera input | Verified: Logitech C270, MJPEG 1280x720 decoded on NVJPG, enrolled person recognized |
-| CSI camera input | Implemented; pipeline builds and fails cleanly without a camera, hardware test pending |
+| CSI camera input | Verified: Raspberry Pi HQ Camera (IMX477, R8 removed), 12.8-15 fps with all outputs, enrolled person recognized at cosine 0.62-0.69 |
 
 ## Documentation
 

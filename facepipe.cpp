@@ -312,7 +312,7 @@ static bool rec_ok() { return access(REC_DIR.c_str(), W_OK) == 0; }  // the /mnt
 static std::mutex j_mu;
 static std::condition_variable j_cv;
 static std::vector<unsigned char> jpeg;  // latest annotated frame, 1080p
-static unsigned long jpeg_seq = 0;
+static GstClockTime jpeg_pts = GST_CLOCK_TIME_NONE;  // timestamp of that frame
 
 static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
   GstSample *smp = gst_app_sink_pull_sample(s);
@@ -323,7 +323,7 @@ static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
     {
       std::lock_guard<std::mutex> lk(j_mu);
       jpeg.assign(m.data, m.data + m.size);
-      jpeg_seq++;
+      jpeg_pts = GST_BUFFER_PTS(b);
     }
     j_cv.notify_all();
     struct stat st;  // the web page touches "want" while someone watches; write live.jpg only then
@@ -341,12 +341,12 @@ static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
   return GST_FLOW_OK;
 }
 
-// latest annotated frame at least `frames` newer than now (so the name label is drawn), or empty after 600 ms
-static std::vector<unsigned char> next_jpeg(unsigned long frames) {
+// first annotated JPEG of a frame labelled after `after` (so the decided name is drawn), or empty after 1.5 s
+static std::vector<unsigned char> jpeg_after(GstClockTime after) {
   std::unique_lock<std::mutex> lk(j_mu);
-  unsigned long want = jpeg_seq + frames;
-  j_cv.wait_for(lk, std::chrono::milliseconds(600), [want] { return jpeg_seq >= want; });
-  return jpeg_seq >= want ? jpeg : std::vector<unsigned char>();
+  auto ready = [after] { return GST_CLOCK_TIME_IS_VALID(jpeg_pts) && jpeg_pts > after; };
+  j_cv.wait_for(lk, std::chrono::milliseconds(1500), ready);
+  return ready() ? jpeg : std::vector<unsigned char>();
 }
 
 static const GstClockTime CLIP_PRE = 3 * GST_SECOND, CLIP_POST = 5 * GST_SECOND;
@@ -465,9 +465,9 @@ static std::string clip_trigger() {
   return rel;
 }
 
-static std::string save_evidence(guint64 track) {
+static std::string save_evidence(guint64 track, GstClockTime after) {
   if (!rec_ok()) return "";
-  auto j = next_jpeg(2);
+  auto j = jpeg_after(after);
   if (j.empty()) return "";
   std::string day, hms;
   stamp(day, hms);
@@ -526,6 +526,7 @@ static void log_event(guint64 track, const std::string &name, float score, float
 }
 
 // ---- per-track state, shared by the tracker probe (producer) and the worker ----
+static GstClockTime last_label_pts = 0;  // PTS of the last frame labelled (guarded by st_mu)
 struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false; std::string name; float score = 0; };
 static std::mutex st_mu;
 static std::unordered_map<guint64, TrackState> tracks;  // ponytail: cleared at 100k tracks; prune by last-seen if long runs need it
@@ -559,8 +560,10 @@ static void rec_worker() {
     auto m = gal.match(e);
     bool known = m.first != "unknown";
     int tries;
+    GstClockTime decided_after;  // frames labelled up to this timestamp may still show the old label
     {
       std::lock_guard<std::mutex> lk(st_mu);
+      decided_after = last_label_pts;
       auto &s = tracks[j.track];
       s.pending = false;
       tries = s.tries;
@@ -568,7 +571,7 @@ static void rec_worker() {
     }
     if (known || tries >= MAX_TRIES) {
       std::string c = clip_trigger();       // clip starts CLIP_PRE before now
-      std::string fr = save_evidence(j.track);  // waits for a frame with the name drawn
+      std::string fr = save_evidence(j.track, decided_after);  // first frame labelled after the decision
       log_event(j.track, m.first, m.second, j.box[4], j.face, fr, c);
       (known ? n_known : n_unknown)++;
     }
@@ -632,12 +635,13 @@ static bool want_attempt(guint64 id, int frame) {
 }
 
 // on-screen box + label for nvdsosd: green name, red Unknown, amber while recognizing
-static void label(NvDsObjectMeta *o) {
+static void label(NvDsObjectMeta *o, GstClockTime pts) {
   std::string txt = "Recognizing...";
   double r = 0.96, g = 0.62, b = 0.04;
-  if (o->object_id != UNTRACKED_OBJECT_ID) {
+  {
     std::lock_guard<std::mutex> lk(st_mu);
-    auto it = tracks.find(o->object_id);
+    if (GST_CLOCK_TIME_IS_VALID(pts)) last_label_pts = pts;
+    auto it = o->object_id == UNTRACKED_OBJECT_ID ? tracks.end() : tracks.find(o->object_id);
     if (it != tracks.end() && it->second.done) {
       if (it->second.name == "unknown") { txt = "Unknown"; r = 0.85; g = 0.18; b = 0.15; }
       else {
@@ -678,7 +682,7 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
     for (NvDsMetaList *ol = fm->obj_meta_list; ol; ol = ol->next) {
       auto *o = (NvDsObjectMeta *)ol->data;
       n_faces++;
-      label(o);
+      label(o, GST_BUFFER_PTS(buf));
       float kps[10];
       if (o->object_id == UNTRACKED_OBJECT_ID || o->rect_params.width < MIN_FACE_PX || !unpack_kps(o, kps)) continue;
       if (!want_attempt(o->object_id, fm->frame_num)) continue;
@@ -781,7 +785,9 @@ static std::string camera_desc(const std::string &uri, int w, int h) {
   std::string caps = "width=" + std::to_string(w) + ",height=" + std::to_string(h) + ",framerate=" +
                      env("FACEPIPE_CAM_FPS", "30") + "/1";
   if (uri.rfind("csi:", 0) == 0)
-    return "nvarguscamerasrc sensor-id=" + std::to_string(atoi(uri.c_str() + 4)) +
+    // bufapi-version=1: DeepStream needs NvBufSurface; the JetPack 4 default (legacy NvBuffer) gives nvstreammux
+    // "Input buffer number of surfaces (0) must be equal to ... (1)"
+    return "nvarguscamerasrc bufapi-version=1 sensor-id=" + std::to_string(atoi(uri.c_str() + 4)) +
            " ! capsfilter caps=\"video/x-raw(memory:NVMM),format=NV12," + caps + "\"";
   std::string dev = uri.substr(4);
   if (env("FACEPIPE_USB_FORMAT", "mjpeg") == "raw")
