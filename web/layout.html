@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="same-origin">
 <title>$title &middot; $site</title>
 <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v=$version">
@@ -22,6 +22,10 @@ $flash
 $body
 </main>
 <footer>facepipe v$version &middot; Jetson Nano &middot; on-device recognition, no data leaves this device &middot; page generated $now</footer>
+<dialog id="confirm" class="dlg" aria-labelledby="dlg-title" aria-describedby="dlg-text">
+ <h2 id="dlg-title">Please confirm</h2><p id="dlg-text"></p>
+ <div class="dlg-actions"><button class="btn" type="button" id="dlg-cancel">Cancel</button><button class="btn primary" type="button" id="dlg-ok">Confirm</button></div>
+</dialog>
 <script src="/static/app.js?v=$version"></script>
 </body>
 </html>

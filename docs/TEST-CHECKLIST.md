@@ -83,3 +83,10 @@ v1.2.0 checks on the Nano (2026-11-07):
 | Pages with real data | second instance on port 8001 with a temporary test login | Overview, Live, Attendance, People, System all 200; 1 person; camera shown as "CSI camera, sensor 0" |
 | Service control | Restart button on the test instance | 303 to `/system?msg=restarted`; facepipe log: stopping, stopped (3 s), started; web log: "service restart from the website; now active" |
 | Sudoers rule | `sudo visudo -cf` then install | parsed OK; `/etc/sudoers.d/facepipe-web` mode 0440 |
+
+v1.2.1 check (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Browser-like POST | `python3 web.py --selftest` on the Nano | `Referrer-Policy: same-origin` sent; `Origin: null` refused like other foreign origins; same-origin post with the token passes the guard |
+| Buttons, dialog, pause in a browser | owner, after the update deploys | to be confirmed by the owner (v1.2.0 failed this in the owner's browser) |
