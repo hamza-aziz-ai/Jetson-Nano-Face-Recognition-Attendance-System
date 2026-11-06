@@ -16,7 +16,7 @@ Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000
                         FACEPIPE_LOGS; log: $FACEPIPE_LOGS/<year>/<Month>/web.log, rotated daily like facepipe.log)
 Self-check:  python3 web.py --selftest
 """
-import base64, csv, datetime, fcntl, getpass, hashlib, hmac, html, io, json, os, re, socket, socketserver, string, subprocess, sys, threading, time
+import base64, cgi, csv, datetime, fcntl, getpass, hashlib, hmac, html, io, json, os, re, secrets, shutil, socket, socketserver, sqlite3, string, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -196,10 +196,6 @@ def status():
     return s
 
 
-def display_name(n):
-    return n.replace("_", " ").strip().title()
-
-
 def clock(iso, seconds):
     """12-hour time of an ISO timestamp, e.g. 09:41 PM or 09:41:07 PM"""
     if not iso:
@@ -227,7 +223,10 @@ CSP = ("default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 's
 FLASH = {  # fixed messages only: the query string never reflects text into the page
     "started": ("ok", "Recognition service started."), "stopped": ("ok", "Recognition service stopped. It stays stopped, also across updates, until you start it."),
     "restarted": ("ok", "Recognition service restarted."), "busy": ("bad", "An update or another action is running; try again in a minute."),
-    "failed": ("bad", "The action failed; see the log below."), "denied": ("bad", "The request was refused (expired form or another site).")}
+    "failed": ("bad", "The action failed; see the log below."),
+    "approving": ("ok", "Enrolling the approved photos; this takes about a minute. Refresh to see the result."),
+    "rejected": ("ok", "Registration rejected; its photos were deleted."), "removed": ("ok", "Removed from recognition; past attendance is kept."),
+    "remove_failed": ("bad", "Could not remove the person; nothing was changed (see the web log)."), "denied": ("bad", "The request was refused (expired form or another site).")}
 esc = html.escape
 
 
@@ -356,22 +355,6 @@ def page_attendance(day, today):
         d.strftime("%A, %d %B %Y"), prev_d, day, today, next_d, dis if day >= today else "", dis if is_today else "", day,
         summary_cards(people, unknown, gal, st), len(people), present, len(absent), absent_html, len(unknown), unknown_html)
     return layout("attendance", "Attendance", body, refresh=is_today)
-
-
-def page_people():
-    gal = enrolled()
-    today = datetime.date.today().isoformat()
-    people, _ = attendance(read_events(today))
-    cards = "".join(
-        "<div class='person' data-name='%s'>%s<div><div class='n'>%s</div><div class='m'>%d photo%s enrolled</div>%s</div></div>"
-        % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)), c, "" if c == 1 else "s",
-           "<span class='badge in'>In today, %s</span>" % hm(people[n]["first"]) if n in people else "<span class='badge out'>Not seen today</span>")
-        for n, c in sorted(gal.items(), key=lambda kv: display_name(kv[0])))
-    body = """<h1>People</h1><p class="sub">Everyone the device recognizes. To add someone, put a few clear photos in <code>gallery/&lt;name&gt;/</code> and run <code>./facepipe-enroll gallery</code>; self-registration with approval is planned.</p>
-<section aria-labelledby="h-people"><div class="sh"><h2 id="h-people">Enrolled</h2><span class="count">%d</span>
- <span class="end"><label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></span></div>%s</section>""" % (
-        len(gal), "<div class='people'>%s</div>" % cards if cards else "<p class='empty'>No one is enrolled yet.</p>")
-    return layout("people", "People", body)
 
 
 def camera_label():
@@ -519,6 +502,405 @@ def first_photo(name):
         return None
     profile = [f for f in files if os.path.splitext(f)[0].lower() == "profile"]  # the person's chosen picture, if any
     return os.path.join(folder, (profile or files)[0]) if files else None
+
+
+# ---------- registration by invitation (D-033, D-034) ----------
+# The admin makes a single-use link (48 h). The person submits a name, 2-5 photos and consent; each photo is decoded and
+# re-encoded on the CPU by `facepipe-enroll --check` and kept under data/registrations/<id>/ (never served publicly, never
+# in gallery/). Nothing is enrolled until the admin approves: approval builds a candidate gallery in a staging folder,
+# enrolls it there, checks it, and only then publishes (photos into gallery/, the new gallery.tsv by rename).
+DB_PATH = os.path.join(DATA, "web.db")
+PEOPLE_JSON = os.path.join(DATA, "people.json")       # person key -> display name (new keys are opaque: p_xxxxxxxx)
+REG_DIR = os.path.join(DATA, "registrations")
+STAGE_DIR = os.path.join(DATA, "stage")
+ENROLL_BIN = os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "facepipe-enroll")
+INVITE_HOURS, PENDING_DAYS = 48, 7                    # owner: link valid 48 h; unreviewed photos deleted after 7 days
+MIN_PHOTOS, MAX_PHOTOS, MAX_PHOTO = 2, 5, 4 * 1024 * 1024
+MAX_UPLOAD = MAX_PHOTOS * MAX_PHOTO + 64 * 1024
+MIN_FREE_MB = 600                                     # enrollment loads TensorRT beside the live pipeline
+CONSENT_VERSION = "2026-11-07"
+CONSENT_TEXT = ("I agree that this device stores these photos and a numeric face template made from them, to recognize me "
+                "and record my attendance. Everything stays on this device. I can ask the administrator to remove me at any time.")
+NAME_RE = re.compile(r"^[^\x00-\x1f<>\"'`]{2,60}$")
+KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_db_lock = threading.Lock()
+
+
+def db():
+    c = sqlite3.connect(DB_PATH, timeout=10)
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created REAL, expires REAL, used REAL, person TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS submissions (id TEXT PRIMARY KEY, invite TEXT, name TEXT, person TEXT, created REAL,"
+              " consent TEXT, photos INTEGER, status TEXT, note TEXT, decided REAL)")
+    return c
+
+
+def people_names():
+    try:
+        with open(PEOPLE_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_people_names(names):
+    tmp = PEOPLE_JSON + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(names, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, PEOPLE_JSON)
+
+
+def display_name(n):
+    shown = people_names().get(n)
+    return shown if shown else n.replace("_", " ").strip().title()
+
+
+def token_hash(t):
+    return hashlib.sha256(t.encode()).hexdigest()
+
+
+def create_invite(person=None):
+    t = secrets.token_urlsafe(16)  # 128 bits
+    now = time.time()
+    with _db_lock, db() as c:
+        c.execute("INSERT INTO invites VALUES (?,?,?,?,?)", (token_hash(t), now, now + INVITE_HOURS * 3600, None, person))
+    LOG.write("INFO", "invitation created%s" % (" to update %s" % person if person else ""))
+    return t
+
+
+def valid_invite(t):
+    if not t or len(t) > 64:
+        return None
+    with db() as c:
+        r = c.execute("SELECT * FROM invites WHERE hash=?", (token_hash(t),)).fetchone()
+    return r if r and r["used"] is None and r["expires"] > time.time() else None
+
+
+def cleanup_registrations():
+    """owner's retention (D-034): unreviewed submissions after 7 days; expired, unused invitations"""
+    now = time.time()
+    with _db_lock, db() as c:
+        old = [r["id"] for r in c.execute("SELECT id FROM submissions WHERE status IN ('pending','failed') AND created<?",
+                                          (now - PENDING_DAYS * 86400,))]
+        for sid in old:
+            shutil.rmtree(os.path.join(REG_DIR, sid), ignore_errors=True)
+            c.execute("UPDATE submissions SET status='expired', note='photos deleted after 7 days unreviewed', decided=? WHERE id=?",
+                      (now, sid))
+        c.execute("DELETE FROM invites WHERE used IS NULL AND expires<?", (now,))
+    for sid in old:
+        LOG.write("INFO", "registration %s: photos deleted after %d days unreviewed" % (sid, PENDING_DAYS))
+
+
+def check_photo(raw, out):
+    """CPU-only decode and canonical re-encode by the enroll binary; returns an error text or None"""
+    tmp = out + ".upload"
+    with open(tmp, "wb") as f:
+        f.write(raw)
+    try:
+        r = subprocess.run([ENROLL_BIN, "--check", tmp, out], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+                           env=dict(os.environ, CV_IO_MAX_IMAGE_PIXELS="40000000"))
+    except (OSError, subprocess.SubprocessError) as e:
+        return "could not check the photo (%s)" % e.__class__.__name__
+    finally:
+        os.remove(tmp)
+    return None if r.returncode == 0 else (r.stderr.decode(errors="replace").strip() or "not a usable image")
+
+
+def submit_registration(invite, name, photos, consent):
+    """photos: list of bytes. Returns (submission id, None) or (None, error message)."""
+    if not consent:
+        return None, "Please read and accept the consent statement."
+    if not invite["person"] and not NAME_RE.match(name.strip()):
+        return None, "Please enter your full name (2 to 60 characters)."
+    if not MIN_PHOTOS <= len(photos) <= MAX_PHOTOS:
+        return None, "Please choose %d to %d photos." % (MIN_PHOTOS, MAX_PHOTOS)
+    if any(len(p) > MAX_PHOTO for p in photos):
+        return None, "Each photo must be under %d MB." % (MAX_PHOTO // 1048576)
+    sid = secrets.token_hex(6)
+    folder = os.path.join(REG_DIR, sid)
+    os.makedirs(folder, mode=0o700)
+    for i, raw in enumerate(photos, 1):
+        err = check_photo(raw, os.path.join(folder, "%d.jpg" % i))
+        if err:
+            shutil.rmtree(folder, ignore_errors=True)
+            return None, "Photo %d: %s." % (i, err)
+    now = time.time()
+    with _db_lock, db() as c:
+        # single use, also under a race: only the request that marks the invitation used may store the submission
+        if c.execute("UPDATE invites SET used=? WHERE hash=? AND used IS NULL", (now, invite["hash"])).rowcount != 1:
+            shutil.rmtree(folder, ignore_errors=True)
+            return None, "This invitation link has already been used."
+        c.execute("INSERT INTO submissions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (sid, invite["hash"], name.strip() or display_name(invite["person"]), invite["person"], now, CONSENT_VERSION,
+                   len(photos), "pending", "", None))
+    LOG.write("INFO", "registration %s submitted (%d photos)%s" % (sid, len(photos),
+                                                                    " to update %s" % invite["person"] if invite["person"] else ""))
+    return sid, None
+
+
+def mem_available_mb():
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 0
+
+
+def gallery_keys(tsv):
+    keys = set()
+    try:
+        with open(tsv, encoding="utf-8") as f:
+            for line in f:
+                k = line.split("\t", 1)[0]
+                if k:
+                    keys.add(k)
+    except OSError:
+        pass
+    return keys
+
+
+def stage_gallery(work, skip=None):
+    """a copy of gallery/ in work/gallery made of hard links (no extra space), without person `skip`"""
+    g = os.path.join(work, "gallery")
+    os.makedirs(g)
+    for person in sorted(os.listdir(GALLERY_DIR)) if os.path.isdir(GALLERY_DIR) else []:
+        src = os.path.join(GALLERY_DIR, person)
+        if person == skip or not os.path.isdir(src):
+            continue
+        os.makedirs(os.path.join(g, person))
+        for f in os.listdir(src):
+            try:
+                os.link(os.path.join(src, f), os.path.join(g, person, f))
+            except OSError:
+                shutil.copy2(os.path.join(src, f), os.path.join(g, person, f))
+    return g
+
+
+def run_enroll(work):
+    """enroll the staged gallery into work/gallery.tsv; returns an error text or None"""
+    if mem_available_mb() < MIN_FREE_MB:
+        return "not enough free memory to enroll now (%d MB); try again later" % mem_available_mb()
+    try:
+        r = subprocess.run([ENROLL_BIN, os.path.join(work, "gallery")], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=900, env=dict(os.environ, FACEPIPE_GALLERY=os.path.join(work, "gallery.tsv")))
+    except (OSError, subprocess.SubprocessError) as e:
+        return "enrollment could not run (%s)" % e.__class__.__name__
+    if r.returncode != 0:
+        last = r.stderr.decode(errors="replace").strip().splitlines()
+        return "enrollment failed: %s" % (last[-1] if last else "exit %d" % r.returncode)
+    return None
+
+
+def publishing():
+    """the update lock: deploys, service actions and gallery changes never overlap (D-033)"""
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    lk = open(LOCK, "a")
+    for _ in range(120):
+        try:
+            fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lk
+        except OSError:
+            time.sleep(1)
+    lk.close()
+    return None
+
+
+_enroll_lock = threading.Lock()  # one enrollment job at a time
+
+
+def approve(sid):
+    """runs in a worker thread; stages, enrolls, checks and publishes, or leaves the active gallery untouched"""
+    with _enroll_lock:
+        with db() as c:
+            s = c.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+        if not s or s["status"] not in ("enrolling",):
+            return
+        work = os.path.join(STAGE_DIR, sid)
+        shutil.rmtree(work, ignore_errors=True)
+        before = gallery_keys(GALLERY_TSV)
+        key = s["person"] or "p_" + secrets.token_hex(4)
+        note, ok = "", False
+        try:
+            g = stage_gallery(work)
+            os.makedirs(os.path.join(g, key), exist_ok=True)
+            new_files = []
+            for f in sorted(os.listdir(os.path.join(REG_DIR, sid))):
+                name = "reg_%s_%s" % (sid, f)
+                shutil.copy2(os.path.join(REG_DIR, sid, f), os.path.join(g, key, name))
+                new_files.append(name)
+            err = run_enroll(work)
+            after = gallery_keys(os.path.join(work, "gallery.tsv"))
+            if not err and key not in after:
+                err = "no face was found in any of the photos"
+            if not err and not before <= after:
+                err = "enrolling would drop %s; nothing was changed" % ", ".join(sorted(before - after))
+            if err:
+                note = err
+            else:
+                lk = publishing()
+                if not lk:
+                    note = "an update kept the gallery busy; nothing was changed, approve again"
+                else:
+                    with lk:
+                        dest = os.path.join(GALLERY_DIR, key)
+                        os.makedirs(dest, exist_ok=True)
+                        for name in new_files:
+                            os.replace(os.path.join(g, key, name), os.path.join(dest, name))
+                        os.replace(os.path.join(work, "gallery.tsv"), GALLERY_TSV)  # live recognition reloads it
+                        if not s["person"]:
+                            names = people_names()
+                            names[key] = s["name"]
+                            save_people_names(names)
+                    ok = True
+        except OSError as e:
+            note = "could not stage the gallery (%s)" % e
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        with _db_lock, db() as c:
+            c.execute("UPDATE submissions SET status=?, note=?, person=?, decided=? WHERE id=?",
+                      ("approved" if ok else "failed", note, key, time.time(), sid))
+        if ok:
+            shutil.rmtree(os.path.join(REG_DIR, sid), ignore_errors=True)
+        LOG.write("INFO" if ok else "ERROR", "registration %s %s%s" % (sid, "approved: enrolled as " + key if ok else "failed: ",
+                                                                         "" if ok else note))
+
+
+def remove_person(key):
+    """remove from recognition: a gallery without the person, enrolled and published; past attendance stays"""
+    with _enroll_lock:
+        work = os.path.join(STAGE_DIR, "remove-" + secrets.token_hex(4))
+        try:
+            stage_gallery(work, skip=key)
+            err = run_enroll(work)
+            remaining = gallery_keys(GALLERY_TSV) - {key}
+            if not err and not remaining <= gallery_keys(os.path.join(work, "gallery.tsv")):
+                err = "the new gallery would lose other people; nothing was changed"
+            if err:
+                LOG.write("ERROR", "removing %s failed: %s" % (key, err))
+                return False
+            lk = publishing()
+            if not lk:
+                return False
+            with lk:
+                os.replace(os.path.join(work, "gallery.tsv"), GALLERY_TSV)
+                shutil.rmtree(os.path.join(GALLERY_DIR, key), ignore_errors=True)
+                names = people_names()
+                names.pop(key, None)
+                save_people_names(names)
+            LOG.write("INFO", "person %s removed from recognition (photos deleted; past attendance kept)" % key)
+            return True
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def reject(sid):
+    with _db_lock, db() as c:
+        c.execute("UPDATE submissions SET status='rejected', note='photos deleted', decided=? WHERE id=? AND status IN ('pending','failed')",
+                  (time.time(), sid))
+    shutil.rmtree(os.path.join(REG_DIR, sid), ignore_errors=True)  # owner: rejected photos are deleted at once
+    LOG.write("INFO", "registration %s rejected; photos deleted" % sid)
+
+
+SHOWN = {}  # one-time display of a new invitation link: nonce -> (link, expires)
+
+
+def public_page(title, body):
+    """pages for people without the admin login (registration): no navigation, no device status"""
+    return LAYOUT.substitute(title=esc(title), site=esc(SITE), page="register", refresh="0", nav="", state="", detail="",
+                             flash="", body=body, version=esc(VERSION), now=hms(datetime.datetime.now().isoformat()))
+
+
+def page_register(invite, token="", error="", name=""):
+    if not invite:
+        return public_page("Registration", "<h1>Registration</h1><section><p class='body'>This invitation link is not valid any "
+                           "more: it was used already or it is older than %d hours. Please ask the administrator for a new "
+                           "one.</p></section>" % INVITE_HOURS)
+    update = invite["person"]
+    who = ("<p class='sub'>New photos for <b>%s</b>. They replace nothing until the administrator approves them.</p>"
+           % esc(display_name(update))) if update else \
+        "<p class='sub'>Register your face for attendance. The administrator reviews every registration before it is used.</p>"
+    name_field = "" if update else (
+        "<label class='field'><span>Full name</span><input name='name' required maxlength='60' autocomplete='name' value='%s'></label>"
+        % esc(name))
+    body = """<h1>%s</h1>%s
+<div id="regerr" class="flash bad"%s role="alert">%s</div>
+<section><form id="regform" class="body form" method="post" action="/register" enctype="multipart/form-data">
+<input type="hidden" name="t" value="%s">%s
+<label class="field"><span>Photos (%d to %d)</span><input name="photos" type="file" accept="image/jpeg,image/png" multiple required>
+<small class="muted">Clear photos of your face only, good light, no sunglasses: one from the front, one turned slightly left, one slightly right. Large photos are shrunk on your device before upload.</small></label>
+<label class="check"><input type="checkbox" name="consent" value="yes" required> <span>%s</span></label>
+<button class="btn primary" type="submit">Send registration</button>
+</form></section>""" % ("Update your photos" if update else "Registration", who, "" if error else " hidden", esc(error),
+                        esc(token), name_field, MIN_PHOTOS, MAX_PHOTOS, esc(CONSENT_TEXT))
+    return public_page("Registration", body)
+
+
+def page_register_done():
+    return public_page("Registration sent", "<h1>Thank you</h1><section><p class='body'>Your registration was sent. The "
+                       "administrator will review it; once approved, the device recognizes you. You can close this page.</p></section>")
+
+
+def page_people(csrf, host, show="", flash=""):
+    cleanup_registrations()
+    gal = enrolled()
+    today = datetime.date.today().isoformat()
+    people, _ = attendance(read_events(today))
+
+    def form(action, label, cls, fields, confirm=None, title=None):
+        conf = (" data-confirm='%s' data-title='%s' data-ok='%s' data-kind='%s'" % (esc(confirm), esc(title), esc(label),
+                "danger" if "danger" in cls else "primary")) if confirm else ""
+        hidden = "".join("<input type='hidden' name='%s' value='%s'>" % (k, esc(v)) for k, v in fields.items())
+        return ("<form method='post' action='/people/%s'%s><input type='hidden' name='csrf' value='%s'>%s"
+                "<button class='btn %s' type='submit'>%s</button></form>" % (action, conf, csrf, hidden, cls, label))
+
+    link = ""
+    if show in SHOWN and SHOWN[show][1] > time.time():
+        link = """<section class="invite"><div class="sh"><h2>Invitation link</h2><span class="count">single use, valid %d hours, shown only now</span></div>
+<div class="body"><div class="copy"><input id="invlink" readonly value="%s" aria-label="Invitation link"><button class="btn primary" type="button" id="copylink">Copy</button></div>
+<p class="muted">Send it to the person. They open it on any phone or computer on this network, add their photos and consent; you approve it below.</p></div></section>""" % (
+            INVITE_HOURS, esc("http://%s/register?t=%s" % (host, SHOWN[show][0])))
+    with db() as c:
+        pending = c.execute("SELECT * FROM submissions WHERE status IN ('pending','enrolling','failed') ORDER BY created").fetchall()
+        recent = c.execute("SELECT * FROM submissions WHERE status IN ('approved','rejected','expired') ORDER BY decided DESC LIMIT 8").fetchall()
+    cards = []
+    for s in pending:
+        thumbs = "".join("<img src='/pending/%s/%d.jpg' alt='Photo %d' loading='lazy'>" % (s["id"], i, i)
+                         for i in range(1, s["photos"] + 1))
+        state = {"pending": "<span class='badge out'>Waiting for you</span>", "enrolling": "<span class='badge in'>Enrolling&hellip;</span>",
+                 "failed": "<span class='badge bad'>Failed</span>"}[s["status"]]
+        acts = "" if s["status"] == "enrolling" else (
+            form("approve", "Approve", "primary", {"id": s["id"]}) +
+            form("reject", "Reject", "danger", {"id": s["id"]}, "The photos are deleted at once.", "Reject this registration?"))
+        cards.append("""<div class="sub-card"><div class="sub-head"><div><div class="n">%s</div><div class="m">%s &middot; sent %s %s</div>%s%s</div>
+<div class="sub-acts">%s</div></div><div class="thumbs">%s</div></div>""" % (
+            esc(s["name"]), "update of %s" % esc(display_name(s["person"])) if s["person"] else "new person",
+            datetime.datetime.fromtimestamp(s["created"]).strftime("%d %b"), hm(datetime.datetime.fromtimestamp(s["created"]).isoformat()),
+            state, "<div class='m bad-text'>%s</div>" % esc(s["note"]) if s["note"] else "", acts, thumbs))
+    pend_html = "<div class='subs'>%s</div>" % "".join(cards) if cards else "<p class='empty'>No registrations waiting.</p>"
+    hist = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td class='muted'>%s</td></tr>" % (
+        esc(r["name"]), esc(r["status"]), hms(datetime.datetime.fromtimestamp(r["decided"] or r["created"]).isoformat()),
+        esc(r["note"] or "")) for r in recent)
+    person_cards = "".join(
+        "<div class='person' data-name='%s'>%s<div class='grow'><div class='n'>%s</div><div class='m'>%d photo%s enrolled</div>%s</div>"
+        "<div class='person-acts'>%s%s</div></div>"
+        % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)), c, "" if c == 1 else "s",
+           "<span class='badge in'>In today, %s</span>" % hm(people[n]["first"]) if n in people else "<span class='badge out'>Not seen today</span>",
+           form("invite", "New photos", "", {"person": n}),
+           form("remove", "Remove", "danger", {"person": n},
+                "Their photos and face templates are deleted; past attendance records stay.", "Remove %s?" % display_name(n)))
+        for n, c in sorted(gal.items(), key=lambda kv: display_name(kv[0]).lower()))
+    body = """<h1>People</h1><p class="sub">Everyone the device recognizes, and registrations waiting for your approval.</p>
+<div class="toolbar"><span class="grow"></span>%s</div>%s
+<section aria-labelledby="h-pend"><div class="sh"><h2 id="h-pend">Waiting for approval</h2><span class="count">%d</span></div>%s</section>
+<section aria-labelledby="h-people"><div class="sh"><h2 id="h-people">Enrolled</h2><span class="count">%d</span>
+ <span class="end"><label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></span></div>%s</section>
+%s""" % (form("invite", "Invite someone", "primary", {}), link, len(pending), pend_html, len(gal),
+         "<div class='people'>%s</div>" % person_cards if person_cards else "<p class='empty'>No one is enrolled yet.</p>",
+         "<section aria-labelledby='h-hist'><div class='sh'><h2 id='h-hist'>Recent decisions</h2></div><table><thead><tr><th scope='col'>Name</th>"
+         "<th scope='col'>Result</th><th scope='col'>When</th><th scope='col'>Note</th></tr></thead><tbody>%s</tbody></table></section>" % hist if hist else "")
+    return layout("people", "People", body, flash=flash)
 
 
 # ---------- server ----------
@@ -676,10 +1058,15 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path.startswith("/static/") and url.path[8:] in STATIC:  # public assets, no data in them
             return self.file(os.path.join(WEB_DIR, url.path[8:]), STATIC[url.path[8:]], cache="public, max-age=3600")
+        q = parse_qs(url.query)
+        if url.path == "/register":  # public: the invitation token is the permission
+            t = q.get("t", [""])[0]
+            return self.html_page(page_register(valid_invite(t), t))
+        if url.path == "/register/done":
+            return self.html_page(page_register_done())
         user = self.user()
         if not user:
             return self.login_required()
-        q = parse_qs(url.query)
         if url.path == "/":
             return self.html_page(page_overview())
         if url.path == "/live":
@@ -698,7 +1085,11 @@ class Handler(BaseHTTPRequestHandler):
                                  {"Content-Disposition": "attachment; filename=attendance-%s.csv" % day})
             return self.html_page(page_attendance(day, today))
         if url.path == "/people":
-            return self.html_page(page_people())
+            host = self.headers.get("Host") or "this-device"
+            return self.html_page(page_people(csrf_token(user), host, q.get("show", [""])[0], q.get("msg", [""])[0]))
+        m = re.match(r"^/pending/([0-9a-f]{12})/([1-5])\.jpg$", url.path)
+        if m and os.path.exists(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg")):
+            return self.file(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg"), cache="no-store")
         if url.path == "/system":
             return self.html_page(page_system(csrf_token(user), q.get("msg", [""])[0]))
         if url.path == "/live.mjpg":
@@ -719,7 +1110,46 @@ class Handler(BaseHTTPRequestHandler):
                 return self.file(path)
         self.send(404, "Not found", "text/plain; charset=utf-8")
 
+    def register_post(self):
+        """public: name, photos and consent for a valid invitation"""
+        fetch = self.headers.get("X-Requested-With") == "fetch"
+        ip, now = self.client_address[0], time.time()
+        hits = [t for t in self.server.reg_hits.get(ip, []) if now - t < 3600]
+        n = int(self.headers.get("Content-Length") or 0)
+
+        def fail(msg, code=400):
+            if fetch:
+                return self.send(code, json.dumps({"ok": False, "error": msg}), "application/json")
+            return self.send(code, page_register(inv, token, msg, name), extra={"Content-Security-Policy": CSP})
+        inv, token, name = None, "", ""
+        if len(hits) >= 10:
+            return fail("Too many registrations from this device; try again later.", 429)
+        if n > MAX_UPLOAD:
+            return fail("The photos are too large together; use %d photos under %d MB each." % (MAX_PHOTOS, MAX_PHOTO // 1048576), 413)
+        if not self.same_origin():
+            return fail("The form was refused; open the invitation link again.", 403)
+        self.server.reg_hits[ip] = hits + [now]
+        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, limit=n,
+                                environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                                         "CONTENT_LENGTH": str(n)})
+        token = form.getfirst("t", "")
+        name = form.getfirst("name", "")
+        inv = valid_invite(token)
+        if not inv:
+            return fail("This invitation link is not valid any more; please ask for a new one.", 403)
+        items = form["photos"] if "photos" in form else []
+        items = items if isinstance(items, list) else [items]
+        photos = [it.file.read(MAX_PHOTO + 1) for it in items if getattr(it, "filename", None)]
+        sid, err = submit_registration(inv, name, photos, form.getfirst("consent") == "yes")
+        if err:
+            return fail(err)
+        if fetch:
+            return self.send(200, json.dumps({"ok": True, "next": "/register/done"}), "application/json")
+        return self.redirect("/register/done")
+
     def do_POST(self):
+        if urlparse(self.path).path == "/register":
+            return self.register_post()
         user = self.user()
         if not user:
             return self.login_required()
@@ -730,9 +1160,34 @@ class Handler(BaseHTTPRequestHandler):
         token = form.get("csrf", [""])[0]
         if not self.same_origin() or not hmac.compare_digest(token, csrf_token(user)):
             LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_address[0]))
-            return self.redirect("/system?msg=denied")
-        if urlparse(self.path).path == "/system/service":
+            return self.redirect(("/people" if self.path.startswith("/people") else "/system") + "?msg=denied")
+        path = urlparse(self.path).path
+        if path == "/system/service":
             return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0]))
+        if path == "/people/invite":
+            person = form.get("person", [""])[0]
+            if person and person not in enrolled():
+                return self.redirect("/people?msg=denied")
+            nonce = secrets.token_hex(8)
+            SHOWN.clear()  # only the newest link is shown, once
+            SHOWN[nonce] = (create_invite(person or None), time.time() + 600)
+            return self.redirect("/people?show=" + nonce)
+        sid = form.get("id", [""])[0]
+        if path in ("/people/approve", "/people/reject") and re.match(r"^[0-9a-f]{12}$", sid):
+            if path == "/people/reject":
+                reject(sid)
+                return self.redirect("/people?msg=rejected")
+            with _db_lock, db() as c:
+                started = c.execute("UPDATE submissions SET status='enrolling', note='' WHERE id=? AND status IN ('pending','failed')",
+                                    (sid,)).rowcount == 1
+            if started:
+                threading.Thread(target=approve, args=(sid,), daemon=True).start()
+            return self.redirect("/people?msg=approving")
+        if path == "/people/remove":
+            person = form.get("person", [""])[0]
+            if person not in enrolled() or not KEY_RE.match(person):
+                return self.redirect("/people?msg=denied")
+            return self.redirect("/people?msg=" + ("removed" if remove_person(person) else "remove_failed"))
         self.send(404, "Not found", "text/plain; charset=utf-8")
 
     def log_message(self, fmt, *args):
@@ -750,6 +1205,7 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
         self.slots = threading.BoundedSemaphore(MAX_REQUESTS)
         self.live_slots = threading.BoundedSemaphore(MAX_LIVE)
         self.fails = {}
+        self.reg_hits = {}
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):  # bounded threads: refuse instead of growing without limit
@@ -871,7 +1327,69 @@ def selftest_http():
         code, h2, _ = get("/system/service", headers=hd, data=d)
         assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))
     assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
+    selftest_registration(get, host)
     srv.shutdown()
+
+
+def selftest_registration(get, host):
+    """invitation, public form, single use, approval into the gallery, rejection, removal; a stand-in replaces the enroll
+    binary (CI has no GPU): --check copies the photo, enrolling writes one zero template per person folder"""
+    global ENROLL_BIN, GALLERY_DIR, GALLERY_TSV
+    saved = ENROLL_BIN, GALLERY_DIR, GALLERY_TSV
+    tmp = os.path.join(DATA, "selftest-reg")
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(os.path.join(tmp, "gallery"))
+    ENROLL_BIN, GALLERY_DIR, GALLERY_TSV = os.path.join(tmp, "enroll.sh"), os.path.join(tmp, "gallery"), os.path.join(tmp, "g.tsv")
+    with open(ENROLL_BIN, "w") as f:
+        f.write('#!/bin/sh\nif [ "$1" = --check ]; then cp "$2" "$3"; echo 1x1; exit 0; fi\n'
+                'z=$(python3 -c \'print(",".join(["0"] * 512))\')\n'
+                'for d in "$1"/*/; do [ -d "$d" ] && printf "%s\\t%s\\n" "$(basename "$d")" "$z"; done > "$FACEPIPE_GALLERY"\nexit 0\n')
+    os.chmod(ENROLL_BIN, 0o755)
+    try:
+        def post_reg(token, photos, consent=True, origin=True):
+            b = "----selftest"
+            parts = [("t", token), ("name", "Asha Rao")] + ([("consent", "yes")] if consent else [])
+            body = b"".join(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (b, k, v)).encode()
+                            for k, v in parts)
+            for i, p in enumerate(photos):
+                body += ("--%s\r\nContent-Disposition: form-data; name=\"photos\"; filename=\"p%d.jpg\"\r\n"
+                         "Content-Type: image/jpeg\r\n\r\n" % (b, i)).encode() + p + b"\r\n"
+            body += ("--%s--\r\n" % b).encode()
+            hd = {"Content-Type": "multipart/form-data; boundary=" + b, "X-Requested-With": "fetch"}
+            if origin:
+                hd["Origin"] = "http://" + host
+            code, _, out = get("/register", auth=None, headers=hd, data=body)
+            return code, json.loads(out.decode())
+        t = create_invite()
+        assert b"regform" in get("/register?t=" + t, auth=None)[2] and b"not valid" in get("/register?t=nope", auth=None)[2]
+        assert post_reg(t, [b"a" * 100, b"b" * 100], origin=False)[0] == 403
+        assert post_reg(t, [b"a" * 100])[1]["ok"] is False                      # one photo is too few
+        assert post_reg(t, [b"a" * 100, b"b" * 100], consent=False)[1]["ok"] is False
+        code, j = post_reg(t, [b"a" * 100, b"b" * 100])
+        assert code == 200 and j["ok"], j
+        assert post_reg(t, [b"a" * 100, b"b" * 100])[0] == 403                 # single use
+        with db() as c:
+            sid = c.execute("SELECT id FROM submissions WHERE status='pending' ORDER BY created DESC").fetchone()["id"]
+            c.execute("UPDATE submissions SET status='enrolling' WHERE id=?", (sid,))
+        assert get("/pending/%s/1.jpg" % sid, auth=None)[0] == 401 and get("/pending/%s/1.jpg" % sid)[0] == 200
+        approve(sid)
+        with db() as c:
+            row = c.execute("SELECT * FROM submissions WHERE id=?", (sid,)).fetchone()
+        key = row["person"]
+        assert row["status"] == "approved" and key in gallery_keys(GALLERY_TSV) and display_name(key) == "Asha Rao", dict(row)
+        assert len(os.listdir(os.path.join(GALLERY_DIR, key))) == 2 and not os.path.exists(os.path.join(REG_DIR, sid))
+        t2 = create_invite()
+        assert post_reg(t2, [b"c" * 100, b"d" * 100])[1]["ok"]
+        with db() as c:
+            sid2 = c.execute("SELECT id FROM submissions WHERE status='pending'").fetchone()["id"]
+        reject(sid2)
+        assert not os.path.exists(os.path.join(REG_DIR, sid2))                  # owner: rejected photos deleted at once
+        removed = remove_person(key)
+        assert removed and key not in gallery_keys(GALLERY_TSV) and not os.path.exists(os.path.join(GALLERY_DIR, key)), (removed, gallery_keys(GALLERY_TSV), os.listdir(GALLERY_DIR))
+        assert b"Waiting for approval" in get("/people")[2]
+    finally:
+        ENROLL_BIN, GALLERY_DIR, GALLERY_TSV = saved
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -369,11 +369,16 @@ static cv::Mat align(const cv::Mat &img, const float *kps) {
 struct Gallery {
   std::vector<std::string> names;
   std::vector<std::vector<float>> embs;
-  time_t mtime = 0;
-  void reload_if_changed() {
+  // identity of the loaded file: enrollment publishes by rename (new inode); second-resolution mtime missed quick updates
+  ino_t ino = 0;
+  long long mtime_ns = -1;
+  off_t size = -1;
+  bool reload_if_changed() {  // true when a new gallery was loaded
     struct stat st;
-    if (stat(GALLERY.c_str(), &st) != 0 || st.st_mtime == mtime) return;
-    mtime = st.st_mtime;
+    if (stat(GALLERY.c_str(), &st) != 0) return false;
+    long long ns = (long long)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+    if (st.st_ino == ino && ns == mtime_ns && st.st_size == size) return false;
+    ino = st.st_ino; mtime_ns = ns; size = st.st_size;
     names.clear(); embs.clear();
     std::ifstream f(GALLERY);
     std::string line;
@@ -389,6 +394,7 @@ struct Gallery {
       embs.push_back(e);
     }
     LOGI("gallery %s: %zu photos", GALLERY.c_str(), names.size());
+    return true;
   }
   std::pair<std::string, float> match(const std::vector<float> &e) const {
     float best = -1;
@@ -716,7 +722,10 @@ static void rec_worker() {
       j = std::move(q_jobs.front());
       q_jobs.pop_front();
     }
-    gal.reload_if_changed();
+    if (gal.reload_if_changed()) {  // people added, updated or removed: names cached on live tracks may be stale
+      std::lock_guard<std::mutex> lk(st_mu);
+      tracks.clear();
+    }
     auto t0 = std::chrono::steady_clock::now();
     auto e = embed(rec, j.face);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -1111,6 +1120,24 @@ static void start_rtsp() {
 
 #ifdef FACEPIPE_ENROLL  // separate binary: it needs OpenCV imgcodecs (imread), which the live binary must not load
 // ---- enrollment: gallery_dir/<name>/<photo> -> GALLERY (written to a temp file, then renamed: live reload is safe) ----
+// facepipe-enroll --check <photo> <out.jpg>: decode an uploaded photo on the CPU (no TensorRT), refuse it unless it is a
+// real image of a sensible size, and write it again as a plain JPEG at most 1600 px wide (drops metadata and anything
+// hidden in the file). The website runs this on every registration photo before it is stored for review.
+// Decoding is bounded by CV_IO_MAX_IMAGE_PIXELS, which the caller sets.
+static int check_photo(const char *in, const char *out) {
+  cv::Mat img = cv::imread(in, cv::IMREAD_COLOR);
+  if (img.empty()) { fprintf(stderr, "not a readable image\n"); return 2; }
+  if (std::min(img.cols, img.rows) < 200 || std::max(img.cols, img.rows) > 8000) {
+    fprintf(stderr, "image is %dx%d; it must be 200 to 8000 pixels on each side\n", img.cols, img.rows);
+    return 3;
+  }
+  double s = std::min(1.0, 1600.0 / std::max(img.cols, img.rows));
+  if (s < 1.0) cv::resize(img, img, cv::Size((int)lrint(img.cols * s), (int)lrint(img.rows * s)), 0, 0, cv::INTER_AREA);
+  if (!cv::imwrite(out, img, {cv::IMWRITE_JPEG_QUALITY, 92})) { fprintf(stderr, "cannot write %s\n", out); return 4; }
+  printf("%dx%d\n", img.cols, img.rows);
+  return 0;
+}
+
 static int enroll(const std::string &root) {
   Engine det, rec;
   det.load(DET_ENGINE.c_str(), nvinfer1::Dims4{1, 3, NET_H, NET_W});
@@ -1166,9 +1193,14 @@ static int enroll(const std::string &root) {
     }
   }
   fclose(out);
+  if (ok == 0 && !people.empty()) {  // keep the previous gallery: an empty result here means every photo failed
+    unlink(tmp.c_str());
+    LOGE("no usable photo in %s: %s left unchanged", root.c_str(), GALLERY.c_str());
+    return 1;
+  }
   if (rename(tmp.c_str(), GALLERY.c_str()) != 0) { LOGE("cannot replace %s", GALLERY.c_str()); return 1; }
   LOGI("enrolled %d photos of %zu people into %s (%d skipped)", ok, people.size(), GALLERY.c_str(), bad);
-  return ok ? 0 : 1;
+  return 0;
 }
 #endif
 
@@ -1262,8 +1294,9 @@ int main(int argc, char **argv) {
   LOG_MODULE = "enroll";
 #endif
 #ifdef FACEPIPE_ENROLL
+  if (argc == 4 && !strcmp(argv[1], "--check")) return check_photo(argv[2], argv[3]);
   if (argc == 2) return enroll(argv[1]);
-  fprintf(stderr, "usage: %s <gallery_dir>\n", argv[0]);
+  fprintf(stderr, "usage: %s <gallery_dir> | --check <photo> <out.jpg>\n", argv[0]);
   return 1;
 #else
   if (argc < 2) {

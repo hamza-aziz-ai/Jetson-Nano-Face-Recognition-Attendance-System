@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-07
+
+### Added
+
+- Registration by invitation (D-033, D-034): the admin creates a single-use link (48 h) on the People page; the person submits a name, 2-5 photos and consent from any device on the network; the admin approves or rejects. New photos for an enrolled person work the same way, and people can be removed from recognition (past attendance stays).
+- `facepipe-enroll --check <photo> <out.jpg>`: CPU-only validation and re-encoding of an uploaded photo.
+
+### Changed
+
+- Approval enrolls a candidate gallery in a staging folder and publishes it only when it is complete; the live gallery is never left half-written.
+- Live recognition detects a new gallery by inode and nanosecond time (was: whole seconds) and forgets names cached on tracks.
+
+### Fixed
+
+- `facepipe-enroll` replaced the gallery even when no photo could be enrolled; it now keeps the previous one.
+
 ## [1.2.2] - 2026-11-07
 
 ### Changed
@@ -159,7 +175,8 @@ First release. Version 1.0.0 will follow once every item in the README validatio
 - Raspberry Pi HQ Camera (IMX477) needs resistor R8 removed before it works on the Nano.
 - Match threshold not tuned on a labelled set; no liveness check.
 
-[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hamza-aziz-ai/Jetson-Nano-Face-Recognition-Attendance-System/compare/v1.1.2...v1.2.0

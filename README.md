@@ -54,7 +54,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 🔍 **Detection** | SCRFD-10G at 640x384 in TensorRT FP16 with a custom decoder for boxes and 5 facial landmarks; adaptive rate: full rate while faces are present, every 6th frame when the scene is empty |
 | 🧭 **Tracking** | NvMultiObjectTracker (IOU): one recognition per person per visit, not per frame |
 | 🧠 **Recognition** | Umeyama alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine or L2 matching; unknown tracks retried up to 5 times |
-| 👤 **Enrollment** | Photos in `gallery/<name>/`, one command; the running service hot-reloads the gallery |
+| 👤 **Enrollment** | Registration by invitation link from any phone on the network, with consent and admin approval; or photos in `gallery/<name>/` and one command. The running service picks up the new gallery by itself |
 | 📋 **Attendance** | Per-day event log with first and last seen, sightings, match score and a face snapshot; CSV export |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
@@ -268,11 +268,12 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | Adaptive detection | ✅ Same boxes and embeddings as before on identical frames (cosine 1.0000); 15 fps empty and occupied |
 | Clean shutdown, watchdog, daily logs | ✅ Verified |
 | Automatic update with health check | ✅ v1.1.1 deployed itself, healthy after 22 s |
-| Website and service control | ✅ 5 pages with real data; Restart from the System page restarted the service cleanly |
+| Website and service control | ✅ 5 pages with real data; Stop, Start and Restart from the System page |
+| Registration and approval | ✅ Real enrollment of an approved registration beside the live pipeline: 16.9 s; removal re-enrolls cleanly |
 
 ## Roadmap
 
-Agreed in a design review (D-033): **v1.2** multi-page website with live view and service control (done) · **v1.3** self-registration by invitation with admin approval · **v1.4** video upload with annotated output, queued beside live · **v1.5** two cameras with enable and disable.
+Agreed in a design review (D-033): **v1.2** multi-page website with live view and service control (done) · **v1.3** self-registration by invitation with admin approval (done) · **v1.4** video upload with annotated output, queued beside live · **v1.5** two cameras with enable and disable.
 
 ## Engineering notes
 
