@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Face matching metric toggle: `FACEPIPE_METRIC=cosine` (default, `FACEPIPE_MATCH` 0.5) or `l2` (`FACEPIPE_L2_MATCH` 0.95), the same settings as the CCTV system. Events record the metric and the L2 distance. `facepipe --selftest` checks the match rule.
+
 ### Changed
 
 - README: System Design (one face from camera to attendance record) and Solution Architecture (change to running device) sections with numbered diagrams and notes; FLOW.md carries a checked-against-code stamp; architecture diagrams show only what exists.

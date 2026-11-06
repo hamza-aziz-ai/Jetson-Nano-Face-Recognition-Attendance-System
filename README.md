@@ -25,7 +25,7 @@ flowchart TB
   TRK --> DUE{"`(5) Attempt due for this track?`"}:::decision
   DUE -->|"`no`"| OSD["`(11) Boxes and names drawn on video`"]:::step
   DUE -->|"`yes`"| EMB["`(6) Align 112x112, **ArcFace** embedding`"]:::step
-  EMB --> MATCH{"`(7) Cosine against the gallery at least 0.5?`"}:::decision
+  EMB --> MATCH{"`(7) Best match passes the threshold? cosine at least 0.5, or L2 at most 0.95`"}:::decision
   MATCH -->|"`yes`"| KNOWN["`(8) Known: name and score`"]:::outcome
   MATCH -->|"`no`"| TRIES{"`5 tries used?`"}:::decision
   TRIES -->|"`no, retry later`"| DUE
@@ -52,7 +52,7 @@ flowchart TB
 4. **Tracking.** The IOU tracker follows each face, so a person is recognized once per visit, not once per frame (D-004).
 5. **Attempt rule.** A track gets a recognition attempt when it is not done, nothing is pending, the face is at least 40 px wide and 8 frames have passed since its last try (D-005).
 6. **Embedding.** The face is aligned to the ArcFace 5-point template and `w600k_r50` turns it into 512 numbers, in RGB (D-008).
-7. **Match.** The best cosine similarity against every enrolled photo must reach `FACEPIPE_MATCH`, default 0.5 (D-018). Below it, the track is retried up to 5 times, then recorded as Unknown.
+7. **Match.** The closest enrolled photo must pass the threshold of the metric chosen by `FACEPIPE_METRIC`: cosine similarity at least `FACEPIPE_MATCH` (default 0.5, the default metric), or L2 distance at most `FACEPIPE_L2_MATCH` (default 0.95), the same pair of settings as the CCTV system (D-018, D-025). Below it, the track is retried up to 5 times, then recorded as Unknown.
 8. **Known.** The label turns green with the name and score. The gallery reloads by itself after enrollment.
 9. **Attendance record.** One JSON line per visit goes into the day's `events-YYYY-MM-DD.jsonl`, with a 112x112 face snapshot (D-009).
 10. **Evidence.** A clip from 3 s before to 5 s after the event (NVENC) and a full-frame image with the name drawn (NVJPG) go to the recordings volume, which drops its oldest week at 90% full (D-014, D-015). If the volume is missing, the event is still recorded without them.
@@ -211,7 +211,9 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | --- | --- | --- |
 | `FACEPIPE_URI` | | `rtsp://...`, `file://...`, `csi:0`, `usb:/dev/video0` |
 | `FACEPIPE_DROP` | `2` | process every Nth frame; keep camera fps / N at or below about 19 on a Nano |
-| `FACEPIPE_MATCH` | `0.5` | cosine threshold for a match |
+| `FACEPIPE_METRIC` | `cosine` | `cosine` or `l2` for face matching |
+| `FACEPIPE_MATCH` | `0.5` | cosine threshold: match when similarity is at least this |
+| `FACEPIPE_L2_MATCH` | `0.95` | L2 threshold: match when distance is at most this |
 | `FACEPIPE_REC` | `/mnt/rec` | recordings volume; recording turns itself off when it is not writable |
 | `FACEPIPE_USB_FORMAT` | `mjpeg` | `mjpeg` or `raw` for USB cameras |
 | `FACEPIPE_CAM_FPS` | `30` | capture rate for CSI and USB cameras |

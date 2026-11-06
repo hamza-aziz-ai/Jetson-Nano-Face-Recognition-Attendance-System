@@ -46,7 +46,7 @@ Key: frame thinning `drop_probe`; detection `pgie_probe` and `decode_scrfd`; lan
 ```mermaid
 flowchart TD
   J["`(1) Worker takes a job`"]:::entry --> G["`(2) Reload gallery if the file changed`"]:::step --> E["`(3) ArcFace embedding, L2 normalised`"]:::step
-  E --> B["`(4) Best cosine match in the gallery`"]:::step --> K{"`(5) Score at least 0.5?`"}:::decision
+  E --> B["`(4) Best cosine match in the gallery`"]:::step --> K{"`(5) Passes the threshold? cosine at least 0.5 or L2 at most 0.95`"}:::decision
   K -->|"`yes`"| KN["`(6) Known: track done`"]:::outcome
   K -->|"`no`"| TR{"`(7) 5 tries used?`"}:::decision
   TR -->|"`no`"| RT["`(8) Track retried later`"]:::outcome
@@ -63,20 +63,20 @@ flowchart TD
   classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
 ```
 
-Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `clip_trigger`, `save_evidence`, `log_event`, `write_bmp` (all in `facepipe.cpp`); threshold `FACEPIPE_MATCH`.
+Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `passes`, `l2_of`, `clip_trigger`, `save_evidence`, `log_event`, `write_bmp` (all in `facepipe.cpp`); settings `FACEPIPE_METRIC`, `FACEPIPE_MATCH`, `FACEPIPE_L2_MATCH`.
 
 1. `rec_worker` waits on the job queue.
 2. `gallery.tsv` is reloaded when its modification time changes, so enrollment needs no restart.
 3. `embed` runs w600k_r50 on the RGB crop (x/127.5 - 1) and L2-normalises the 512-d result.
 4. `Gallery::match` takes the highest cosine over all enrolled photos.
-5. The threshold is `FACEPIPE_MATCH`, default 0.5.
+5. `passes` applies the chosen metric: cosine at least `FACEPIPE_MATCH` (default 0.5, default metric), or L2 distance at most `FACEPIPE_L2_MATCH` (default 0.95). Embeddings are normalised, so L2 = sqrt(2 - 2 cosine) and both metrics pick the same closest photo.
 6. A match marks the track done with the person's name; the label turns green.
 7. Below the threshold the try count decides.
 8. Fewer than 5 tries: the track gets another attempt (FLOW 1, step 7).
 9. On the 5th try the track is done as Unknown; the label turns red.
 10. `clip_trigger` starts an MP4 clip from the ring buffer (3 s back) or extends the current one by 5 s.
 11. `save_evidence` waits for the next annotated frame (name drawn) and writes it as a 1080p JPEG.
-12. `log_event` writes a 112x112 BMP face snapshot and appends one JSON line with time, name, score, snapshot, frame and clip.
+12. `log_event` writes a 112x112 BMP face snapshot and appends one JSON line with time, name, cosine score, metric, L2 distance, snapshot, frame and clip.
 
 ## 3. Dashboard and live view
 

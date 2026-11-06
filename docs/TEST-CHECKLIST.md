@@ -24,6 +24,7 @@ The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG
 | --- | --- | --- |
 | Build | `make all` | No errors; `facepipe`, `facepipe-enroll`, `tracker.yml` exist |
 | Web self-test | `python3 web.py --selftest` | `selftest ok` |
+| Match rule | `./facepipe --selftest` | `selftest ok` (cosine and L2 thresholds, same closest photo for both) |
 | Version | `./facepipe --version` | the `VERSION` file's content; same in `data/status.json` and the dashboard footer |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |
 | Live run | `FACEPIPE_DIR=. timeout -s INT 60 ./facepipe <source> 1920 1080` | `[facepipe] fps` near 15 with `FACEPIPE_DROP=2` on a 30 fps camera; known faces counted |

@@ -13,7 +13,8 @@
 // ArcFace 5-point template, det 0.6, NMS 0.4) so embeddings compare with the CCTV gallery too.
 // Usage: facepipe <source> [width height]   e.g. facepipe rtsp://cam/stream 1920 1080 | facepipe csi:0 1920 1080
 // Env: FACEPIPE_DIR (app dir with configs and models/, default .), FACEPIPE_DATA (default $FACEPIPE_DIR/data),
-//      FACEPIPE_GALLERY (default $FACEPIPE_DATA/gallery.tsv), FACEPIPE_MATCH (cosine threshold, default 0.5),
+//      FACEPIPE_GALLERY (default $FACEPIPE_DATA/gallery.tsv), FACEPIPE_METRIC (cosine or l2, default cosine),
+//      FACEPIPE_MATCH (cosine threshold, default 0.5), FACEPIPE_L2_MATCH (L2 distance threshold, default 0.95),
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
 //      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554).
 // stdout: one JSON line per recognition attempt (with the embedding); stderr: logs.
@@ -33,6 +34,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cmath>
@@ -71,7 +73,13 @@ static const float ARC_DST[5][2] = {{38.2946f, 51.6963f}, {73.5318f, 51.5014f}, 
 static std::string env(const char *k, const std::string &def) { const char *v = getenv(k); return v && *v ? v : def; }
 static std::string DATA_DIR, GALLERY, REC_DIR;
 static const std::string LIVE_DIR = "/dev/shm/facepipe";  // live.jpg for the web page's MJPEG view (RAM, no SSD wear)
-static float MATCH = 0.5f;
+static float MATCH = 0.5f;      // cosine threshold (FACEPIPE_MATCH), used when the metric is cosine
+static float L2_MATCH = 0.95f;  // L2 distance threshold (FACEPIPE_L2_MATCH), used when the metric is l2
+static bool METRIC_L2 = false;  // FACEPIPE_METRIC=cosine (default) or l2
+// Embeddings are L2-normalised, so L2 distance = sqrt(2 - 2 cosine): cosine 0.5 is L2 1.0, L2 0.95 is cosine 0.549.
+// The best candidate is the same for both metrics; only the threshold rule differs.
+static float l2_of(float cosine) { return std::sqrt(std::max(0.f, 2.f - 2.f * cosine)); }
+static bool passes(float cosine) { return METRIC_L2 ? l2_of(cosine) <= L2_MATCH : cosine >= MATCH; }
 
 // ---- gst-rtsp-server 1.14: the runtime library is installed but not its -dev headers, so declare the few calls used.
 // ponytail: hand-written prototypes; install libgstrtspserver-1.0-dev and include <gst/rtsp-server/rtsp-server.h> instead
@@ -277,7 +285,7 @@ struct Gallery {
       for (int k = 0; k < 512; k++) s += e[k] * embs[i][k];
       if (s > best) { best = s; bi = i; }
     }
-    return {best >= MATCH ? names[bi] : "unknown", best};
+    return {!embs.empty() && passes(best) ? names[bi] : "unknown", best};
   }
 };
 
@@ -508,9 +516,12 @@ static void log_event(guint64 track, const std::string &name, float score, float
   write_bmp(DATA_DIR + "/snaps/" + snap, face_rgb);
   FILE *f = fopen((DATA_DIR + "/events-" + day + ".jsonl").c_str(), "a");
   if (!f) { fprintf(stderr, "cannot write events in %s\n", DATA_DIR.c_str()); return; }
-  fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"det\":%.3f,\"snap\":%s,\"frame\":%s,\"clip\":%s}\n",
+  // score is always the best cosine; metric and l2 record which rule decided and the matching L2 distance
+  fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
+             "\"snap\":%s,\"frame\":%s,\"clip\":%s}\n",
           iso, std::chrono::duration<double>(now.time_since_epoch()).count(), (unsigned long long)track,
-          json_str(name).c_str(), score, det, json_str(snap).c_str(), json_str(frame).c_str(), json_str(clip_rel).c_str());
+          json_str(name).c_str(), score, METRIC_L2 ? "l2" : "cosine", l2_of(score), det, json_str(snap).c_str(),
+          json_str(frame).c_str(), json_str(clip_rel).c_str());
   fclose(f);
 }
 
@@ -895,6 +906,35 @@ static int enroll(const std::string &root) {
 }
 #endif
 
+// facepipe --selftest: checks the match rule for both metrics (no camera, GPU or models needed)
+static int selftest() {
+  bool m = METRIC_L2;
+  float c = MATCH, l = L2_MATCH;
+  MATCH = 0.5f; L2_MATCH = 0.95f;
+  assert(std::fabs(l2_of(1.f)) < 1e-6f && std::fabs(l2_of(0.5f) - 1.f) < 1e-6f && std::fabs(l2_of(-1.f) - 2.f) < 1e-6f);
+  METRIC_L2 = false;
+  assert(passes(0.5f) && passes(0.9f) && !passes(0.49f));
+  METRIC_L2 = true;  // L2 0.95 is cosine 0.54875
+  assert(passes(0.56f) && !passes(0.54f) && !passes(0.5f));
+  Gallery g;  // same best candidate for both metrics
+  g.names = {"a", "b"};
+  g.embs = {std::vector<float>(512, 0.f), std::vector<float>(512, 0.f)};
+  g.embs[0][0] = 1.f;
+  g.embs[1][1] = 1.f;
+  std::vector<float> q(512, 0.f);
+  q[0] = 0.8f; q[1] = 0.6f;  // cosine 0.8 with a, 0.6 with b
+  METRIC_L2 = false;
+  assert(g.match(q).first == "a");
+  METRIC_L2 = true;
+  assert(g.match(q).first == "a");
+  q[0] = 0.5f; q[1] = std::sqrt(0.75f);  // cosine 0.866 with b, 0.5 with a
+  assert(g.match(q).first == "b");
+  assert(Gallery().match(q).first == "unknown");
+  METRIC_L2 = m; MATCH = c; L2_MATCH = l;
+  printf("selftest ok\n");
+  return 0;
+}
+
 int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--version")) { printf("%s\n", FACEPIPE_VERSION); return 0; }
   std::string app_dir = env("FACEPIPE_DIR", ".");
@@ -904,6 +944,12 @@ int main(int argc, char **argv) {
   GALLERY = env("FACEPIPE_GALLERY", DATA_DIR + "/gallery.tsv");
   REC_DIR = env("FACEPIPE_REC", "/mnt/rec");
   MATCH = std::stof(env("FACEPIPE_MATCH", "0.5"));
+  L2_MATCH = std::stof(env("FACEPIPE_L2_MATCH", "0.95"));
+  std::string metric = env("FACEPIPE_METRIC", "cosine");
+  std::transform(metric.begin(), metric.end(), metric.begin(), ::tolower);
+  if (metric != "cosine" && metric != "l2") { fprintf(stderr, "FACEPIPE_METRIC must be cosine or l2, got '%s'\n", metric.c_str()); return 1; }
+  METRIC_L2 = metric == "l2";
+  if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest();
   mkdir(DATA_DIR.c_str(), 0755);
 #ifdef FACEPIPE_ENROLL
   if (argc == 2) return enroll(argv[1]);
@@ -923,8 +969,8 @@ int main(int argc, char **argv) {
   std::string uri = argv[1];
   bool camera = uri.rfind("csi:", 0) == 0 || uri.rfind("usb:", 0) == 0;
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
-  fprintf(stderr, "[facepipe] version %s, processing every %u frame(s), match >= %.2f, data %s\n", FACEPIPE_VERSION,
-          frame_step(), MATCH, DATA_DIR.c_str());
+  fprintf(stderr, "[facepipe] version %s, processing every %u frame(s), match %s %s %.2f, data %s\n", FACEPIPE_VERSION,
+          frame_step(), METRIC_L2 ? "L2" : "cosine", METRIC_L2 ? "<=" : ">=", METRIC_L2 ? L2_MATCH : MATCH, DATA_DIR.c_str());
   gst_init(&argc, &argv);
   std::thread worker(rec_worker);
 

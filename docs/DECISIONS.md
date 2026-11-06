@@ -221,3 +221,14 @@ The first release is 0.9.0, not 1.0.0: 1.0.0 is reserved for when every item in 
 Chosen: two README sections right after the introduction, following the owner's other repositories (CCTV and HalalLens): System Design traces one face from camera to attendance record, Solution Architecture traces a change to the running device. Each has one top-to-bottom Mermaid diagram with numbered nodes, a how-to-read line, numbered notes with bold lead-ins naming real settings and decision IDs, and a link to the detailed doc. FLOW.md and ARCHITECTURE.md hold the detail and win when they disagree with the README.
 Why: A reader sees the runtime path and the delivery path in two minutes, without file paths.
 Trade-off: Three places to keep in sync; the pull-request template asks about all three, CI renders the diagrams, and FLOW.md records the commit it was last checked against. Only what exists on main is drawn; planned work lives in HANDOVER.md. No versions of other components are named in README notes.
+
+## D-025: Cosine or L2 matching, chosen by a setting (owner)
+Options:
+
+1. Cosine only
+2. A toggle between cosine similarity and L2 distance
+
+Chosen: 2 (owner request), default cosine
+Why: The CCTV system exposes both (`COSINE_THRESHOLD` 0.5, `L2_THRESHOLD` 0.95); the Nano uses the same model and normalisation, so the same settings carry over. Embeddings are L2-normalised, so L2 = sqrt(2 - 2 cosine): the closest photo is identical under both, and only the threshold rule differs. The defaults are not equivalent: L2 0.95 equals cosine 0.549, slightly stricter than cosine 0.5.
+Trade-off: Two thresholds to tune; events always store the cosine score and also the L2 distance and the metric used, so the dashboard and reports stay comparable.
+Revisit if: a labelled evaluation shows one metric and threshold clearly better.
