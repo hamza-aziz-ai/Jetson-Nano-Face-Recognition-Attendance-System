@@ -9,6 +9,7 @@ Added 2026-11-06 at the owner's request ("Do not put everything in just one webp
 - **Limits:** at most 24 requests at a time and 4 live viewers; request bodies up to 4 KB; clients that stop sending are dropped after 30 s; files and clips are streamed in 64 KB chunks with HTTP Range (before, a whole range was read into memory).
 - **Confirmations:** the site's own dialog (an HTML `<dialog>`), not the browser's pop-up. Pausing the live view keeps the last frame, labelled Paused.
 - **Referrer policy:** `same-origin`, so the browser sends this site's origin with its own forms (needed by the same-origin check) and nothing to other sites.
+- **Pictures:** a person's avatar is `gallery/<name>/profile.jpg` (or `.png`) if present, otherwise their first photo by name. A profile picture in the folder is also an enrollment photo the next time `facepipe-enroll` runs.
 - **Messages:** the System page shows fixed messages chosen by a key in the URL; no request text is reflected into a page.
 
 Proof: `python3 web.py --selftest` starts a real server on a free port and checks login, all five pages with their CSP, HTML escaping of a hostile name, Range, and that a POST is refused without `Origin`, with a wrong token, from another site, with an unknown action and when too large. On the Nano, a second instance on port 8001 with the real data served all pages, and its Restart button restarted the live service through the sudoers rule (clean stop in 3 s, active again). See TEST-CHECKLIST.

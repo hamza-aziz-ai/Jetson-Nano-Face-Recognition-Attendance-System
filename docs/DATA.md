@@ -4,7 +4,7 @@ All data lives on the device. None of it is in the repository.
 
 | Data | Where | Format | Contains | Kept |
 | --- | --- | --- | --- | --- |
-| Enrollment photos | `gallery/<name>/*.jpg\|png` | Images | Faces of enrolled people | Until removed by hand |
+| Enrollment photos | `gallery/<name>/*.jpg\|png` | Images | Faces of enrolled people; `profile.jpg` is also the picture shown on the website | Until removed by hand |
 | Wanted service state | `data/desired` | `running` or `stopped` | Whether recognition was stopped on the website | Until changed on the website |
 | Web log | `logs/<year>/<Month>/web.log` | Text lines | Failed logins and refused requests with the client address, service actions | Kept (no retention rule set by the owner) |
 | Gallery | `data/gallery.tsv` | One line per photo: name TAB 512 floats | Face embeddings | Rebuilt by `facepipe-enroll` |

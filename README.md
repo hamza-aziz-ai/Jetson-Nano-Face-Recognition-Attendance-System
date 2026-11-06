@@ -210,7 +210,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 2. **Install.** `sh deploy/install.sh` builds both binaries, builds the TensorRT engines on the device (about 15 minutes, once), runs the self-tests, creates `facepipe.env`, and installs and starts the services and the update timer as the current user, from this folder. Re-running it is safe; `--no-service` stops before the services.
 3. **Choose the camera.** In `facepipe.env`, set `FACEPIPE_URI` (`rtsp://...`, `usb:/dev/video0`, `csi:0` or a file) and, if the system clock is UTC, `TZ`. Then `sudo systemctl restart facepipe`.
 4. **Set the logins.** `python3 web.py --set-password <user>` for the dashboard; optionally `python3 web.py --set-rtsp-password <user>` (without it the RTSP server stays off).
-5. **Enroll people.** Create `gallery/<person_name>/` with a few clear photos each (front, slight left, slight right), then run `./facepipe-enroll gallery`.
+5. **Enroll people.** Create `gallery/<person_name>/` with a few clear photos each (front, slight left, slight right), then run `./facepipe-enroll gallery`. A photo named `profile.jpg` becomes the person's picture on the website.
 6. **Open the dashboard** at `http://<nano>:8000`. Logs are in `logs/`; `sudo journalctl -u facepipe -f` shows the same lines live.
 
 <details>
