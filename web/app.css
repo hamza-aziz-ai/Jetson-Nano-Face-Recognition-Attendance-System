@@ -67,6 +67,16 @@ footer{max-width:1180px;margin:0 auto;padding:0 1.2rem 2rem;color:var(--muted);f
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 [hidden]{display:none!important}
 .pill:empty{display:none}
+.form.wide{max-width:none}.form h3{margin:.2rem 0 0;font-size:1rem}
+.row{display:flex;gap:1rem;flex-wrap:wrap}.row .field{flex:1;min-width:12rem}.row .grow2{flex:2.2}
+.field select,.field input{font:inherit;border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;background:var(--card)}
+.choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.7rem}
+.choice{display:flex;gap:.6rem;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:.8rem;cursor:pointer}
+.choice:has(input:checked){border-color:var(--accent);background:#f2f6fe}
+.choice small{display:block;color:var(--muted);font-weight:400}.choice input{margin-top:.25rem}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85rem;overflow-wrap:anywhere}
+td.acts{display:flex;gap:.4rem;flex-wrap:wrap}td.acts form{margin:0}td.acts .btn{font-size:.82rem;padding:.3rem .6rem}
+.ok-text{color:var(--ok)!important}.card .v.small{font-size:1.15rem;margin-top:.35rem}
 .form{display:grid;gap:1rem;max-width:36rem}.field{display:grid;gap:.3rem}.field span{font-weight:600}
 .field input[type=text],.field input:not([type]),.field input[name=name]{font:inherit;border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem}
 .check{display:flex;gap:.6rem;align-items:flex-start;color:var(--muted)}.check input{margin-top:.3rem}

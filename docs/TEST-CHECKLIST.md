@@ -106,3 +106,12 @@ v1.3.0 checks on the Nano (2026-11-07):
 | Photo check (CPU) | `CV_IO_MAX_IMAGE_PIXELS=40000000 ./facepipe-enroll --check <file> out.jpg` | text file: "not a readable image", exit 2; profile photo: 512x512, exit 0 |
 | Registration flow, self-test | `python3 web.py --selftest` (stand-in enroll binary) | ok: invitation, form, origin, too few photos, no consent, single use, admin-only photos, approve, reject deletes photos, remove |
 | Real approval beside live | real binaries, copy of the gallery, 3 of the owner's photos as "Test Person" | `--check` passed 3 photos; approve 16.9 s from 1321 MB free; "enrolled 14 photos of 2 people"; remove: "enrolled 11 photos of 1 people" |
+
+v1.4.0 checks on the Nano (2026-11-07):
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Cameras self-test | `python3 web.py --selftest` | ok: add with login (0600 file, password not on the page), enable, disable, bad address, "enable one first", remove |
+| Camera from the file | test instance with `FACEPIPE_CAMERAS` and no camera argument | file source: "camera chosen on the website, 1920x1080"; USB: 1280x720, 9.4 fps |
+| RTSP test button | `probe_rtsp` | phone stream: `H.264 (High Profile)`; no camera at the address: "the stream could not be opened" |
+| USB list | `video_devices()` | `/dev/video1 UVC Camera (046d:0825)`; CSI sensor (vi-output) left out |

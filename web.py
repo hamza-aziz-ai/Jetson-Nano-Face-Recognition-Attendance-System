@@ -16,7 +16,7 @@ Run:  python3 web.py   (env: FACEPIPE_DATA, FACEPIPE_DIR, FACEPIPE_WEB_PORT=8000
                         FACEPIPE_LOGS; log: $FACEPIPE_LOGS/<year>/<Month>/web.log, rotated daily like facepipe.log)
 Self-check:  python3 web.py --selftest
 """
-import base64, cgi, csv, datetime, fcntl, getpass, hashlib, hmac, html, io, json, os, re, secrets, shutil, socket, socketserver, sqlite3, string, subprocess, sys, threading, time
+import base64, cgi, csv, datetime, fcntl, glob, getpass, hashlib, hmac, html, io, json, os, re, secrets, shutil, socket, socketserver, sqlite3, string, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -217,7 +217,7 @@ WEB_DIR = os.path.join(HERE, "web")
 STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "logo.svg": "image/svg+xml"}
 LAYOUT = string.Template(open(os.path.join(WEB_DIR, "layout.html"), encoding="utf-8").read())
 PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
-         ("people", "/people", "People"), ("system", "/system", "System")]
+         ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("system", "/system", "System")]
 CSP = ("default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 FLASH = {  # fixed messages only: the query string never reflects text into the page
@@ -226,7 +226,14 @@ FLASH = {  # fixed messages only: the query string never reflects text into the 
     "failed": ("bad", "The action failed; see the log below."),
     "approving": ("ok", "Enrolling the approved photos; this takes about a minute. Refresh to see the result."),
     "rejected": ("ok", "Registration rejected; its photos were deleted."), "removed": ("ok", "Removed from recognition; past attendance is kept."),
-    "remove_failed": ("bad", "Could not remove the person; nothing was changed (see the web log)."), "denied": ("bad", "The request was refused (expired form or another site).")}
+    "remove_failed": ("bad", "Could not remove the person; nothing was changed (see the web log)."),
+    "cam_saved": ("ok", "Camera setup saved; recognition restarted with it."), "cam_reverted": ("ok", "Previous camera setup restored; recognition restarted."),
+    "cam_saved_stopped": ("ok", "Camera setup saved. Recognition is stopped; start it on the System page to use it."),
+    "cam_saved_inactive": ("ok", "Saved. Network cameras are not in use now; choose Network cameras above to use them."),
+    "cam_none": ("ok", "No camera is enabled, so recognition was stopped."), "cam_none_enabled": ("bad", "Enable a network camera first (in the list below)."),
+    "cam_nousb": ("bad", "That USB camera is not connected."), "cam_bad": ("bad", "Check the name and the address (it must start with rtsp://)."),
+    "cam_added": ("ok", "Camera added."), "cam_removed": ("ok", "Camera removed."), "cam_noprev": ("bad", "There is no earlier camera setup to restore."),
+    "cam_test_ok": ("ok", "The camera answered."), "cam_test_bad": ("bad", "The camera test failed; see the line under its name."), "denied": ("bad", "The request was refused (expired form or another site).")}
 esc = html.escape
 
 
@@ -903,6 +910,261 @@ def page_people(csrf, host, show="", flash=""):
     return layout("people", "People", body, flash=flash)
 
 
+# ---------- cameras (D-034): how the device is connected; several network cameras, one USB or one CSI camera ----------
+# data/cameras.json (0600) holds the whole setup, including RTSP logins; data/cameras.active (0600) is what facepipe reads:
+# "<uri> <width> <height>". The previous pair is kept as *.prev for Revert. The website never shows an RTSP password.
+CAM_JSON = os.path.join(DATA, "cameras.json")
+CAM_ACTIVE = os.path.join(DATA, "cameras.active")
+MAX_ACTIVE_RTSP = 1   # two at once comes with the next release
+SIZES = {"1920x1080": (1920, 1080), "1280x720": (1280, 720)}
+RTSP_RE = re.compile(r"^rtsps?://[^\s'\"<>\\]+$")
+CAM_NAME_RE = re.compile(r"^[^\x00-\x1f<>\"'`]{1,40}$")
+
+
+def env_uri():
+    try:
+        for line in open(os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "facepipe.env"), encoding="utf-8"):
+            if line.startswith("FACEPIPE_URI="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def load_cameras():
+    """the saved setup, or one derived from FACEPIPE_URI the first time"""
+    try:
+        with open(CAM_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        pass
+    uri = env_uri()
+    cfg = {"source": "csi", "csi": "0", "usb": "/dev/video0", "size": "1920x1080", "rtsp": []}
+    if uri.startswith("csi:"):
+        cfg.update(source="csi", csi=uri[4:] or "0")
+    elif uri.startswith("usb:"):
+        cfg.update(source="usb", usb=uri[4:], size="1280x720")
+    elif RTSP_RE.match(uri):
+        cfg.update(source="rtsp", rtsp=[{"id": secrets.token_hex(4), "name": "Camera 1", "url": uri, "enabled": True}])
+    return cfg
+
+
+def masked(url):
+    """rtsp://user:•••@host:port/path: the password never reaches a page"""
+    u = urlparse(url)
+    if u.password is None:
+        return url
+    return url.replace("%s:%s@" % (u.username, u.password), "%s:\u2022\u2022\u2022@" % u.username, 1)
+
+
+def with_login(url, user, pw):
+    """put a username and password into an RTSP address (percent-encoded)"""
+    u = urlparse(url)
+    if not user:
+        return url
+    host = u.netloc.rsplit("@", 1)[-1]
+    return url.replace(u.netloc, "%s:%s@%s" % (quote(user, safe=""), quote(pw, safe=""), host), 1)
+
+
+def video_devices():
+    """USB cameras only: CSI sensors also appear as /dev/videoN, named vi-output by the Tegra driver"""
+    out = []
+    for d in sorted(glob.glob("/sys/class/video4linux/video*")):
+        try:
+            name = open(os.path.join(d, "name")).read().strip()
+        except OSError:
+            continue
+        if not name.startswith("vi-output"):
+            out.append(("/dev/" + os.path.basename(d), name))
+    return out
+
+
+def active_line(cfg):
+    w, h = SIZES.get(cfg.get("size"), (1920, 1080))
+    if cfg["source"] == "csi":
+        return "csi:%s %d %d" % (cfg["csi"], w, h)
+    if cfg["source"] == "usb":
+        return "usb:%s %d %d" % (cfg["usb"], w, h)
+    on = [c for c in cfg["rtsp"] if c.get("enabled")]
+    return "%s %d %d" % (on[0]["url"], w, h) if on else ""
+
+
+def write_private(path, text):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def apply_cameras(cfg):
+    """save, keep the previous setup for Revert, restart recognition if it is meant to run; returns a FLASH key"""
+    line = active_line(cfg)
+    for p in (CAM_JSON, CAM_ACTIVE):
+        if os.path.exists(p):
+            shutil.copy2(p, p + ".prev")
+    write_private(CAM_JSON, json.dumps(cfg, indent=1))
+    if not line:  # no camera enabled: recognition stops and stays stopped until one is enabled
+        write_private(CAM_ACTIVE, "")
+        return "cam_none" if service_action("stop") == "stopped" else "failed"
+    write_private(CAM_ACTIVE, line + "\n")
+    LOG.write("INFO", "camera setup changed: %s" % (cfg["source"] if cfg["source"] != "rtsp" else "network camera"))
+    if read_desired() == "stopped":
+        return "cam_saved_stopped"
+    return "cam_saved" if service_action("restart") == "restarted" else "failed"
+
+
+def revert_cameras():
+    if not os.path.exists(CAM_JSON + ".prev"):
+        return "cam_noprev"
+    for p in (CAM_JSON, CAM_ACTIVE):
+        if os.path.exists(p + ".prev"):
+            os.replace(p + ".prev", p)
+    if read_desired() == "stopped":
+        return "cam_saved_stopped"
+    return "cam_reverted" if service_action("restart") == "restarted" else "failed"
+
+
+def probe_rtsp(url):
+    """can the device open this stream? (gst-discoverer, 10 s); returns (ok, short text without the address)"""
+    try:
+        r = subprocess.run(["gst-discoverer-1.0", "-t", "10", url], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, "could not test (%s)" % e.__class__.__name__
+    text = r.stdout.decode(errors="replace")
+    v = re.search(r"video(?:\(\d+\))?: ([^\n]+)", text)
+    if r.returncode == 0 and v:
+        return True, v.group(1).strip()[:80]
+    if "nauthorized" in text or "401" in text:
+        return False, "the camera refused the login"
+    if "timeout" in text.lower() or "Timeout" in text:
+        return False, "no answer from the camera within 10 s"
+    return False, "the stream could not be opened"
+
+
+def page_cameras(csrf, flash="", test=None):
+    cfg = load_cameras()
+    st = status()
+
+    def form(action, label, cls, fields, confirm=None, title=None):
+        conf = (" data-confirm='%s' data-title='%s' data-ok='%s' data-kind='%s'" % (esc(confirm), esc(title), esc(label),
+                "danger" if "danger" in cls else "primary")) if confirm else ""
+        hidden = "".join("<input type='hidden' name='%s' value='%s'>" % (k, esc(v)) for k, v in fields.items())
+        return ("<form method='post' action='/cameras/%s'%s><input type='hidden' name='csrf' value='%s'>%s"
+                "<button class='btn %s' type='submit'>%s</button></form>" % (action, conf, csrf, hidden, cls, label))
+
+    usb_opts = "".join("<option value='%s'%s>%s (%s)</option>" % (esc(dev), " selected" if dev == cfg["usb"] else "", esc(dev), esc(name))
+                       for dev, name in video_devices()) or "<option value='%s'>%s (not detected)</option>" % (esc(cfg["usb"]), esc(cfg["usb"]))
+    size_opts = "".join("<option value='%s'%s>%s</option>" % (k, " selected" if k == cfg.get("size") else "", k.replace("x", " x "))
+                        for k in SIZES)
+
+    def radio(v, title, text):
+        return ("<label class='choice'><input type='radio' name='source' value='%s'%s><span><b>%s</b><small>%s</small></span></label>"
+                % (v, " checked" if cfg["source"] == v else "", title, text))
+    rows = []
+    for c in cfg["rtsp"]:
+        res = ""
+        if test and test[0] == c["id"]:
+            res = "<div class='m %s'>%s</div>" % ("ok-text" if test[1] else "bad-text", esc(test[2]))
+        rows.append("<tr><td><b>%s</b>%s</td><td class='mono'>%s</td><td>%s</td><td class='acts'>%s%s%s</td></tr>" % (
+            esc(c["name"]), res, esc(masked(c["url"])),
+            "<span class='badge in'>Enabled</span>" if c.get("enabled") else "<span class='badge out'>Disabled</span>",
+            form("toggle", "Disable" if c.get("enabled") else "Enable", "", {"id": c["id"]}),
+            form("test", "Test", "", {"id": c["id"]}),
+            form("remove", "Remove", "danger", {"id": c["id"]}, "Its address and login are deleted from the device.",
+                 "Remove %s?" % c["name"])))
+    table = ("<table><thead><tr><th scope='col'>Name</th><th scope='col'>Address</th><th scope='col'>State</th>"
+             "<th scope='col'>Actions</th></tr></thead><tbody>%s</tbody></table>" % "".join(rows)) if rows else \
+        "<p class='empty'>No network cameras yet; add one below.</p>"
+    current = {"csi": "CSI camera, sensor %s" % cfg["csi"], "usb": "USB camera %s" % cfg["usb"]}.get(cfg["source"]) or \
+        ", ".join(c["name"] for c in cfg["rtsp"] if c.get("enabled")) or "no network camera enabled"
+    body = """<h1>Cameras</h1><p class="sub">Choose how this device gets its video. Network cameras can be in different places, so several can be set up; a USB or CSI camera is attached to the device itself.</p>
+<div class="cards"><div class="card"><div class="k">In use now</div><div class="v small">%s</div><div class="s">%s</div></div></div>
+<section aria-labelledby="h-src"><div class="sh"><h2 id="h-src">Connection</h2></div>
+<form method="post" action="/cameras/source" class="body form wide" data-confirm="Recognition restarts with the new camera; video stops for a few seconds." data-title="Use this camera setup?" data-ok="Save" data-kind="primary">
+<input type="hidden" name="csrf" value="%s">
+<div class="choices">%s%s%s</div>
+<div class="row"><label class="field"><span>USB camera</span><select name="usb">%s</select></label>
+<label class="field"><span>CSI sensor</span><select name="csi"><option value="0"%s>Sensor 0</option><option value="1"%s>Sensor 1</option></select></label>
+<label class="field"><span>Resolution</span><select name="size">%s</select></label></div>
+<div><button class="btn primary" type="submit">Save and apply</button></div></form>
+<div class="actions">%s</div></section>
+<section aria-labelledby="h-rtsp"><div class="sh"><h2 id="h-rtsp">Network cameras (RTSP)</h2><span class="count">%d set up, %d enabled at a time</span></div>%s
+<form method="post" action="/cameras/add" class="body form wide" autocomplete="off"><input type="hidden" name="csrf" value="%s">
+<h3>Add a network camera</h3>
+<div class="row"><label class="field"><span>Name</span><input name="name" required maxlength="40" placeholder="Main gate"></label>
+<label class="field grow2"><span>Stream address</span><input name="url" required placeholder="rtsp://192.0.2.10:554/stream1"></label></div>
+<div class="row"><label class="field"><span>Username (optional)</span><input name="user" autocomplete="off"></label>
+<label class="field"><span>Password (optional)</span><input name="pw" type="password" autocomplete="new-password"></label></div>
+<small class="muted">The login is stored only on this device (readable by the service account only) and is never shown again.</small>
+<div><button class="btn primary" type="submit">Add camera</button></div></form></section>""" % (
+        esc(current), esc(st["detail"]), csrf,
+        radio("rtsp", "Network cameras", "RTSP/IP cameras on the network"), radio("usb", "USB camera", "a webcam plugged into the device"),
+        radio("csi", "CSI camera", "a ribbon-cable camera, e.g. Raspberry Pi HQ"),
+        usb_opts, " selected" if cfg["csi"] == "0" else "", " selected" if cfg["csi"] == "1" else "", size_opts,
+        form("revert", "Revert to the previous setup", "", {}, "The camera setup before the last change is restored and recognition restarts.",
+             "Revert the camera setup?") if os.path.exists(CAM_JSON + ".prev") else "",
+        len(cfg["rtsp"]), MAX_ACTIVE_RTSP, table, csrf)
+    return layout("cameras", "Cameras", body, flash=flash)
+
+
+def camera_post(path, form):
+    """handles /cameras/<action>; returns (FLASH key, test result or None)"""
+    cfg = load_cameras()
+    get = lambda k: form.get(k, [""])[0].strip()
+    cams = {c["id"]: c for c in cfg["rtsp"]}
+    action = path.rsplit("/", 1)[-1]
+    if action == "source":
+        src = get("source")
+        if src not in ("rtsp", "usb", "csi") or get("csi") not in ("0", "1") or get("size") not in SIZES:
+            return "denied", None
+        if src == "usb" and get("usb") not in [d for d, _ in video_devices()]:
+            return "cam_nousb", None
+        if src == "rtsp" and not any(c.get("enabled") for c in cfg["rtsp"]):
+            return "cam_none_enabled", None
+        cfg.update(source=src, csi=get("csi"), size=get("size"), usb=get("usb") or cfg["usb"])
+        return apply_cameras(cfg), None
+    if action == "add":
+        url, name = get("url"), get("name")
+        if not RTSP_RE.match(url) or not CAM_NAME_RE.match(name):
+            return "cam_bad", None
+        if len(cfg["rtsp"]) >= 20:
+            return "cam_bad", None
+        enabled = not any(c.get("enabled") for c in cfg["rtsp"])
+        cfg["rtsp"].append({"id": secrets.token_hex(4), "name": name, "url": with_login(url, get("user"), get("pw")),
+                            "enabled": enabled})
+        if cfg["source"] == "rtsp" and enabled:
+            return apply_cameras(cfg), None
+        write_private(CAM_JSON, json.dumps(cfg, indent=1))
+        return "cam_added", None
+    c = cams.get(get("id"))
+    if not c:
+        return "denied", None
+    if action == "test":
+        ok, text = probe_rtsp(c["url"])
+        LOG.write("INFO", "camera test %s: %s" % (c["name"], "ok" if ok else text))
+        return ("cam_test_ok" if ok else "cam_test_bad"), (c["id"], ok, text)
+    if action == "toggle":
+        if c.get("enabled"):
+            c["enabled"] = False
+        else:
+            for other in cfg["rtsp"]:  # one network camera at a time in this release: enabling one disables the others
+                other["enabled"] = False
+            c["enabled"] = True
+        if cfg["source"] == "rtsp":
+            return apply_cameras(cfg), None
+        write_private(CAM_JSON, json.dumps(cfg, indent=1))
+        return "cam_saved_inactive", None
+    if action == "remove":
+        was_on = c.get("enabled")
+        cfg["rtsp"] = [x for x in cfg["rtsp"] if x["id"] != c["id"]]
+        if cfg["source"] == "rtsp" and was_on:
+            return apply_cameras(cfg), None
+        write_private(CAM_JSON, json.dumps(cfg, indent=1))
+        return "cam_removed", None
+    return "denied", None
+
+
 # ---------- server ----------
 MAX_BODY = 4096       # forms here are tiny
 MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
@@ -1090,6 +1352,8 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/pending/([0-9a-f]{12})/([1-5])\.jpg$", url.path)
         if m and os.path.exists(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg")):
             return self.file(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg"), cache="no-store")
+        if url.path == "/cameras":
+            return self.html_page(page_cameras(csrf_token(user), q.get("msg", [""])[0]))
         if url.path == "/system":
             return self.html_page(page_system(csrf_token(user), q.get("msg", [""])[0]))
         if url.path == "/live.mjpg":
@@ -1160,7 +1424,8 @@ class Handler(BaseHTTPRequestHandler):
         token = form.get("csrf", [""])[0]
         if not self.same_origin() or not hmac.compare_digest(token, csrf_token(user)):
             LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_address[0]))
-            return self.redirect(("/people" if self.path.startswith("/people") else "/system") + "?msg=denied")
+            back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras") else "system")
+            return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
         if path == "/system/service":
             return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0]))
@@ -1183,6 +1448,12 @@ class Handler(BaseHTTPRequestHandler):
             if started:
                 threading.Thread(target=approve, args=(sid,), daemon=True).start()
             return self.redirect("/people?msg=approving")
+        if path.startswith("/cameras/"):
+            with _enroll_lock:  # one change at a time
+                msg, test = camera_post(path, form)
+            if test:  # the test result is shown on the page itself, without a redirect
+                return self.html_page(page_cameras(csrf_token(user), msg, test))
+            return self.redirect("/cameras?msg=" + msg)
         if path == "/people/remove":
             person = form.get("person", [""])[0]
             if person not in enrolled() or not KEY_RE.match(person):
@@ -1328,7 +1599,35 @@ def selftest_http():
         assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))
     assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
     selftest_registration(get, host)
+    selftest_cameras(get, host)
     srv.shutdown()
+
+
+def selftest_cameras(get, host):
+    """passwords never reach a page; add, enable, remove a network camera while a CSI camera is in use (no restarts)"""
+    assert masked("rtsp://admin:s3cret@cam:554/s") == "rtsp://admin:\u2022\u2022\u2022@cam:554/s" and masked("rtsp://cam/s") == "rtsp://cam/s"
+    assert with_login("rtsp://cam:554/s", "u", "p@ss:1") == "rtsp://u:p%40ss%3A1@cam:554/s"
+    assert active_line({"source": "csi", "csi": "0", "usb": "", "size": "1920x1080", "rtsp": []}) == "csi:0 1920 1080"
+    for p in (CAM_JSON, CAM_ACTIVE):
+        if os.path.exists(p):
+            os.remove(p)
+    write_private(CAM_JSON, json.dumps({"source": "csi", "csi": "0", "usb": "/dev/video1", "size": "1920x1080", "rtsp": []}))
+    tok = csrf_token("admin")
+    hd = {"Origin": "http://" + host}
+    code, h, _ = get("/cameras/add", headers=hd, data=("csrf=%s&name=Gate&url=rtsp%%3A%%2F%%2Fcam%%3A554%%2Fs&user=admin&pw=topsecret" % tok).encode())
+    assert code == 303 and h["Location"] == "/cameras?msg=cam_added", (code, h.get("Location"))
+    cfg = load_cameras()
+    assert cfg["rtsp"][0]["url"] == "rtsp://admin:topsecret@cam:554/s" and cfg["rtsp"][0]["enabled"]
+    assert oct(os.stat(CAM_JSON).st_mode & 0o777) == "0o600"
+    page = get("/cameras")[2]
+    assert b"topsecret" not in page and b"Gate" in page and "\u2022".encode() in page
+    cid = cfg["rtsp"][0]["id"]
+    assert get("/cameras/toggle", headers=hd, data=("csrf=%s&id=%s" % (tok, cid)).encode())[1]["Location"] == "/cameras?msg=cam_saved_inactive"
+    assert not load_cameras()["rtsp"][0]["enabled"]
+    assert get("/cameras/add", headers=hd, data=("csrf=%s&name=X&url=http%%3A%%2F%%2Fx" % tok).encode())[1]["Location"] == "/cameras?msg=cam_bad"
+    assert get("/cameras/source", headers=hd, data=("csrf=%s&source=rtsp&csi=0&size=1920x1080" % tok).encode())[1]["Location"] == "/cameras?msg=cam_none_enabled"
+    assert get("/cameras/remove", headers=hd, data=("csrf=%s&id=%s" % (tok, cid)).encode())[1]["Location"] == "/cameras?msg=cam_removed"
+    assert load_cameras()["rtsp"] == [] and not os.path.exists(CAM_ACTIVE)
 
 
 def selftest_registration(get, host):

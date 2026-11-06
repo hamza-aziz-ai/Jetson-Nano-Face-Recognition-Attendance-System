@@ -50,7 +50,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 
 | Area | What it does |
 | --- | --- |
-| 🎥 **Video sources** | RTSP/IP cameras (forced to TCP), video files, **CSI** cameras through the Argus ISP, **USB** cameras (MJPEG decoded on NVJPG, or raw YUY2) |
+| 🎥 **Video sources** | Chosen on the website's Cameras page: RTSP/IP cameras (several set up, tested and enabled from the page; forced to TCP), **USB** cameras (MJPEG decoded on NVJPG), **CSI** cameras through the Argus ISP; video files from the command line |
 | 🔍 **Detection** | SCRFD-10G at 640x384 in TensorRT FP16 with a custom decoder for boxes and 5 facial landmarks; adaptive rate: full rate while faces are present, every 6th frame when the scene is empty |
 | 🧭 **Tracking** | NvMultiObjectTracker (IOU): one recognition per person per visit, not per frame |
 | 🧠 **Recognition** | Umeyama alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine or L2 matching; unknown tracks retried up to 5 times |
@@ -208,7 +208,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
    - `w600k_r50.onnx` from InsightFace's `buffalo_l` pack;
    - `scrfd_10g_384x640.onnx`: take `scrfd_10g_gnkps.onnx` from the InsightFace-REST model zoo and fix its input on any PC with `python3 tools/reshape_scrfd.py scrfd_10g_gnkps.onnx models/scrfd_10g_384x640.onnx` (needs `pip install onnx`).
 2. **Install.** `sh deploy/install.sh` builds both binaries, builds the TensorRT engines on the device (about 15 minutes, once), runs the self-tests, creates `facepipe.env`, and installs and starts the services and the update timer as the current user, from this folder. Re-running it is safe; `--no-service` stops before the services.
-3. **Choose the camera.** In `facepipe.env`, set `FACEPIPE_URI` (`rtsp://...`, `usb:/dev/video0`, `csi:0` or a file) and, if the system clock is UTC, `TZ`. Then `sudo systemctl restart facepipe`.
+3. **Choose the camera.** On the website's **Cameras** page, or in `facepipe.env` with `FACEPIPE_URI` (`rtsp://...`, `usb:/dev/video0`, `csi:0` or a file). If the system clock is UTC, set `TZ` in `facepipe.env` and `sudo systemctl restart facepipe`.
 4. **Set the logins.** `python3 web.py --set-password <user>` for the dashboard; optionally `python3 web.py --set-rtsp-password <user>` (without it the RTSP server stays off).
 5. **Enroll people.** Create `gallery/<person_name>/` with a few clear photos each (front, slight left, slight right), then run `./facepipe-enroll gallery`. A photo named `profile.jpg` becomes the person's picture on the website.
 6. **Open the dashboard** at `http://<nano>:8000`. Logs are in `logs/`; `sudo journalctl -u facepipe -f` shows the same lines live.
@@ -269,6 +269,7 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | Clean shutdown, watchdog, daily logs | ✅ Verified |
 | Automatic update with health check | ✅ v1.1.1 deployed itself, healthy after 22 s |
 | Website and service control | ✅ 5 pages with real data; Stop, Start and Restart from the System page |
+| Cameras page | ✅ Camera taken from the page's file (video file, USB 1280x720); RTSP test against a phone camera |
 | Registration and approval | ✅ Real enrollment of an approved registration beside the live pipeline: 16.9 s; removal re-enrolls cleanly |
 
 ## Roadmap
