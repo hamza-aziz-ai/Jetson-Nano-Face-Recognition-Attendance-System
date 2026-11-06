@@ -194,7 +194,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 
 ## Remote access
 
-Optional: a Cloudflare Tunnel publishes the website at a hostname over HTTPS without opening any router port, with Cloudflare Access in front so only the owner gets to the login page (D-035). Setup, five steps in the Cloudflare dashboard and on the Nano: [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md).
+Optional: a Cloudflare Tunnel publishes the website at a hostname over HTTPS without opening any router port, behind the site's own sign-in page, with a maintenance page at Cloudflare when the device cannot be reached (D-035, D-037). Setup, six steps in the Cloudflare dashboard and on the Nano: [docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md).
 
 ## Security and privacy
 
@@ -325,6 +325,7 @@ Every bug has a write-up in [docs/bugs/](docs/bugs/).
 | `deploy/deploy.sh`, `deploy/update.sh` | Release deploy with health check and rollback; the automatic update check |
 | `deploy/*.in` | systemd unit templates (filled in by `install.sh`) |
 | `deploy/cloudflared-facepipe.service` | Optional Cloudflare Tunnel service for remote access (docs/REMOTE-ACCESS.md) |
+| `deploy/maintenance/` | Optional Cloudflare Worker: maintenance page while the device cannot be reached (D-037) |
 | `tools/reshape_scrfd.py` | Makes the 640x384 SCRFD model from the InsightFace-REST model zoo file |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
 | `Makefile` | Builds both binaries; `make check` compiles without linking (CI) |

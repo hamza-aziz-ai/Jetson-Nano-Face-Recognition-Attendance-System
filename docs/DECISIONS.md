@@ -349,6 +349,7 @@ Chosen: 4 (owner: hostname `attendance.hamzaaziz.dev`, Access in front, cloudfla
 Why: the owner wants to see who came and went, and the device's health, from anywhere, and to stop recognition remotely if something goes wrong. A tunnel opens no inbound port. The site holds faces and attendance of a household, so Access (the owner's email) stands in front of the site's own login; `/register*` and `/static/*` bypass Access because invitation links are for people without an account and still need a valid single-use invitation.
 Trade-off: Faces viewed remotely pass through Cloudflare (TLS ends at its edge); the device needs internet for remote access; a Cloudflare outage cuts remote access, not the home network.
 Revisit if: the site must be reachable without Cloudflare, or more administrators need access.
+Update 2026-11-07 (owner): Cloudflare Access removed ("I want to remove that cloudflare login and I do want people to reach to https://attendance.hamzaaziz.dev/"), after being told the site's own sign-in page then faces the internet. The sign-in page (D-036) with the per-visitor lockout is the only lock; the password must be strong.
 
 ## D-036: Sign-in page with a signed session cookie instead of HTTP Basic (owner, with Codex (council))
 Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council, agreed after 3 exchanges).
@@ -363,3 +364,15 @@ Why: the owner asked for the site's own sign-in instead of the browser pop-up, a
 Rejected: a Host allowlist (the cookie is host-only and forms carry an unguessable token; it would also put host names into the repository); a separate pre-sign-in form token (one account, so a forced sign-in gains an attacker nothing).
 Trade-off: Sign-out clears the cookie but cannot revoke a stolen token before it expires (12 h); delete `data/session.key` and restart the website to end every session. On the home network the site is plain HTTP, so the password and cookie cross the LAN in clear (as with Basic).
 Revisit if: more than one account is needed, or sessions must be revocable one by one.
+
+## D-037: Maintenance page as a Cloudflare Worker on the page addresses (owner)
+Options:
+
+1. Cloudflare's own error page (error 1033 / 502)
+2. Cloudflare custom error pages
+3. A Worker that passes requests through and answers with a maintenance page only when the Nano cannot
+
+Chosen: 3 (owner asked for a custom maintenance page "shown when tunnel is broken" and signed in to Cloudflare with `wrangler login` for it). `deploy/maintenance/worker.js`, no dependencies: HTTP 530, 502, 504 and 520-529 from the origin, or a failed fetch, become a 503 page in the site's look with `Retry-After: 30` and a 30 s reload; the website's own answers, its 503s included, pass through. Routes only on page addresses (`deploy/maintenance/deploy.sh <hostname>`).
+Why: when the tunnel or the Nano is down, the request never reaches the device, so the page must live at Cloudflare. A Worker is code in the repository and works on the free plan; it runs only on page addresses so the status polls (every 5-10 s per open page), files and clips do not count against the 100,000 requests a day.
+Trade-off: Pages now pass through a Worker (about 1 ms); if the daily limit were ever reached, those page requests would fail until the next day (remove with `npx wrangler delete --name facepipe-maintenance`). Status polls and the live stream still get Cloudflare's error while the device is down; the open page then says it cannot reach the device.
+Revisit if: traffic grows near the free limit, or a plan with custom error pages is bought.

@@ -1,11 +1,11 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
+Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
 
 ## Versions
 
-- `main`: v1.0.3 (`92eaa15`) plus docs. Released: v1.0.0 to v1.0.3 (GitHub releases with assets and SHA256SUMS).
-- The device runs v1.2.0 (website + service control), deployed by its own update timer (D-031) on 2026-11-07 00:08 IST. v1.0.2 was never deployed (rolled back).
+- `main`: v1.8.0 (sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
+- Camera in use: the owner's phone over RTSP (chosen on the Cameras page); face matching L2 <= 0.90 (System page).
 
 ## Device
 
@@ -34,9 +34,11 @@ Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "S
 - People page: cards were cramped (fixed in v1.4.1); generally tighten spacing, typography and button styles across pages.
 - Footer says "no data leaves this device": must change if remote access through Cloudflare is added.
 
-## Remote access (D-035), 2026-11-07
+## Remote access (D-035, D-036, D-037), 2026-11-07
 
-- Owner chose `attendance.hamzaaziz.dev`, Cloudflare Access in front, approved the cloudflared download. cloudflared 2026.10.7 (`.deb`, SHA-256 checked) and `/etc/systemd/system/cloudflared-facepipe.service` are installed on the Nano, disabled until the owner puts the token in `/etc/cloudflared/facepipe-tunnel.env` (0600) and enables it. Owner steps: docs/REMOTE-ACCESS.md. Never read or print the token.
+- Tunnel `attendance.hamzaaziz.dev` is live (cloudflared-facepipe enabled by the owner; token in `/etc/cloudflared/facepipe-tunnel.env`, never read or print it). Route: `http://localhost:8000`.
+- Owner removed Cloudflare Access: the site's own sign-in page is the only lock. Owner told the password must be strong.
+- Maintenance page: Worker `facepipe-maintenance` deployed with the owner's `wrangler login` on the page routes (`sh deploy/maintenance/deploy.sh attendance.hamzaaziz.dev`).
 
 ## Next (owner's request of 2026-11-06, in order)
 
