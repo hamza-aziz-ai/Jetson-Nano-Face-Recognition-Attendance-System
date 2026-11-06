@@ -288,3 +288,14 @@ Chosen: 3
 Why: The owner's layout (`logs/<year>/<Month>/<module>.log`, backups `<module>.log.DD-Mon-YYYY` in the month folder, at most 31 a month) and line format (`[DD-MM-YYYY] hh:mm:ss.fff AM/PM, Weekday [LEVEL]`) do not fit logrotate's naming, and logrotate would need a root cron entry. Rotation happens with the first line after midnight; a file left by a run that ended before midnight is renamed by date at the next start; a second run on the same day appends to that day's backup. Lines also go to stderr, so `journalctl` keeps working.
 Trade-off: Prints from libraries (GStreamer, DeepStream, TensorRT plugins) reach only the journal. No deletion of old months: the owner set no retention, and the logs are small (one status line a minute).
 Revisit if: logs fill the microSD, or a retention rule is set.
+
+## D-031: Automatic deployment by a pull timer on the Nano (owner)
+Options:
+
+1. Self-hosted GitHub Actions runner on the Nano (the Deploy workflow, D-026)
+2. A systemd timer on the Nano that polls the public release list and runs `deploy.sh`
+
+Chosen: 2 (owner)
+Why: The runner needs a registration token typed on the device and an agent with outbound GitHub access that executes workflow jobs; a public repository adds risk to that. The timer needs nothing secret: every 10 minutes `deploy/update.sh` reads the latest release tag (public API, no token) and, if it is newer than `VERSION`, runs that release's `deploy.sh`, which already builds, self-tests, health-checks and rolls back. A failed release is not retried until a newer one exists; it never downgrades; a lock stops overlapping runs; an unreachable GitHub is logged once per outage. Same model as the CCTV edge watcher on the Orin.
+Trade-off: Up to 10 minutes from release to deploy; the Nano needs internet for updates (it stays fully offline for its work); a deploy needs the camera online (health = advancing frames), otherwise it rolls back and that release is skipped. The Deploy workflow stays in the repository for a runner, off unless `NANO_RUNNER` is set.
+Revisit if: several devices need staged rollouts, or the Nano loses internet access permanently.

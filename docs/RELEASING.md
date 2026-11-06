@@ -25,3 +25,7 @@ Each release carries what a Nano installs, built and tested on a Nano: both bina
 ## Rollback
 
 Releases are never edited or deleted. To go back, deploy the previous tag (`git checkout vX.Y.Z`, copy, `make all`, restart) and publish a new PATCH release that reverts the faulty change.
+
+## Automatic deployment (D-031)
+
+On a device installed with `deploy/install.sh`, `facepipe-update.timer` checks every 10 minutes and deploys a newer published release by itself, with rollback. So publishing the release (pushing a `vX.Y.Z` tag after green CI) is the deployment. Follow it in `logs/<year>/<Month>/update.log`, or run it at once with `sudo systemctl start facepipe-update`.

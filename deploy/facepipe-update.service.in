@@ -1,0 +1,12 @@
+[Unit]
+Description=facepipe automatic update: deploy a newer GitHub release (deploy/update.sh)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=@USER@
+WorkingDirectory=@APP_DIR@
+# TZ for the log; FACEPIPE_REPO may point at a fork
+EnvironmentFile=-@APP_DIR@/facepipe.env
+ExecStart=/bin/sh @APP_DIR@/deploy/update.sh @APP_DIR@

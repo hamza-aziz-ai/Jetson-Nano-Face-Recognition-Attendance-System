@@ -46,11 +46,13 @@ fi
 [ "${1:-}" = "--no-service" ] && { echo "done (no services installed)"; exit 0; }
 
 echo "== services (as $USER_NAME, from $APP)"
-for u in facepipe facepipe-web; do
-  sed -e "s#@USER@#$USER_NAME#g" -e "s#@APP_DIR@#$APP#g" "deploy/$u.service.in" | sudo tee "/etc/systemd/system/$u.service" >/dev/null
+for u in facepipe.service facepipe-web.service facepipe-update.service facepipe-update.timer; do
+  sed -e "s#@USER@#$USER_NAME#g" -e "s#@APP_DIR@#$APP#g" "deploy/$u.in" | sudo tee "/etc/systemd/system/$u" >/dev/null
 done
 sudo systemctl daemon-reload
 sudo systemctl enable facepipe.service facepipe-web.service
+# automatic updates (D-031): deploy.sh needs `sudo -n systemctl stop|start facepipe facepipe-web` without a password
+sudo systemctl enable --now facepipe-update.timer
 [ -f web_auth ] || echo "set the dashboard login first: python3 web.py --set-password <user>"
 sudo systemctl restart facepipe facepipe-web
 echo "done: dashboard on http://<this-device>:$(grep -E '^FACEPIPE_WEB_PORT=' facepipe.env | cut -d= -f2 || echo 8000)"

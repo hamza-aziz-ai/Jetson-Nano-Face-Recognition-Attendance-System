@@ -93,7 +93,7 @@ flowchart TB
 4. **Main.** Only green commits are released.
 5. **Version.** The `VERSION` file follows Semantic Versioning and is compiled into the binaries, `status.json` and the dashboard footer (D-023).
 6. **Release.** Pushing a `vX.Y.Z` tag reruns the full CI, checks that the tag matches `VERSION` and has a changelog section, and publishes the GitHub Release with those notes.
-7. **Deploy.** `deploy/deploy.sh` builds the tag on the Nano with `make all` (linking against the JetPack libraries on the device), runs the self-tests, installs over the app folder while keeping configuration, data and models, restarts the services and rolls back if the new version is not healthy within 60 s. A Deploy to Nano workflow runs the same script on a self-hosted runner and uploads the release assets; it stays switched off until a runner is registered (D-026).
+7. **Deploy.** `deploy/deploy.sh` builds the tag on the Nano with `make all` (linking against the JetPack libraries on the device), runs the self-tests, installs over the app folder while keeping configuration, data and models, restarts the services and rolls back unless the new process produces frames within the watchdog time plus 60 s. Deployment is automatic: a timer on the Nano checks the public release list every 10 minutes and runs that script for a newer release (D-031). A Deploy to Nano workflow can run the same script on a self-hosted runner instead (off unless registered, D-026).
 8. **On the device.** `facepipe` (pipeline) and `facepipe-web` (dashboard) run under systemd, restart on failure and reconnect to the camera.
 9. **Models.** TensorRT engines are built on the Nano itself with `trtexec`, because an engine is tied to the GPU and TensorRT version it was built on.
 10. **Storage.** Code, models, data and the gallery live on the microSD; clips and evidence go to a size-capped 64 GB volume.
@@ -194,7 +194,7 @@ Engineering documentation lives in [`docs/`](docs/): [architecture](docs/ARCHITE
    echo '/var/lib/facepipe-rec.img /mnt/rec ext4 loop,nofail,noatime 0 2' | sudo tee -a /etc/fstab
    sudo mount /mnt/rec && sudo chown $USER:$USER /mnt/rec
    ```
-7. Open `http://<nano>:8000`. Logs: `sudo journalctl -u facepipe -f`. Updates: `sh deploy/deploy.sh vX.Y.Z <app folder>` builds, tests and installs a release, and rolls back if it is unhealthy.
+7. Open `http://<nano>:8000`. Logs: `sudo journalctl -u facepipe -f`. Updates are automatic: `facepipe-update.timer` deploys each new release within 10 minutes (log: `logs/<year>/<Month>/update.log`); `sh deploy/deploy.sh vX.Y.Z <app folder>` does the same by hand.
 
 Using a custom OpenCV build (for example with CUDA) instead of the system one: `make all OPENCV_PC=<its lib/pkgconfig>`.
 
@@ -222,7 +222,7 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | `facepipe.env.example` | All runtime settings |
 | `deploy/install.sh` | One-step install on a Nano: build, engines, self-tests, `facepipe.env`, systemd services for the current user and folder |
 | `deploy/*.service.in` | systemd unit templates (filled in by `install.sh`) |
-| `deploy/deploy.sh`, `deploy/upload-assets.py` | Release deploy with rollback, and release-asset upload |
+| `deploy/deploy.sh`, `deploy/update.sh`, `deploy/upload-assets.py` | Release deploy with rollback, the automatic update check, and release-asset upload |
 | `tools/reshape_scrfd.py` | Makes the 640x384 SCRFD model from the InsightFace-REST model zoo file |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
 | `Makefile` | Builds both binaries; `make check` compiles without linking (CI) |

@@ -19,6 +19,9 @@ Snapshot: **2026-11-06 21:45 IST**. Volatile state; verify before acting (see "S
 2. **Empty clips (owner's report):** five 0-byte `*_clip.mp4` files today (four unknown events, one known), one 23 KB for 4.2 s. v1.0.3 logs how each clip ended; reproduce after deploying (owner in front of the camera; a high `FACEPIPE_MATCH` makes every face unknown).
 3. **v1.1.0: adaptive detection (D-028), this commit.** Own SCRFD probe replacing nvinfer; same results as nvinfer on identical frames; empty scene 15 fps, 2.4 detections/s, GPU about 0%. Still to measure with a face present (owner): fps and delivery gaps during recognition.
 
+4. **v1.1.1: automatic deployment (D-031)**, owner chose a pull timer over the GitHub runner: `facepipe-update.timer` every 10 min runs `deploy/update.sh`. Units must be installed on the owner's Nano with approval of the exact files.
+5. **Council job-4 running** on the website, registration, uploads and two cameras.
+
 ## Next (owner's request of 2026-11-06, in order)
 
 1. End-to-end tests on RTSP, file, USB and CSI (owner in front of the live cameras).

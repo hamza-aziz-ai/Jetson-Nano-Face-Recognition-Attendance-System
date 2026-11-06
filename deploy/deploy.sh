@@ -14,7 +14,7 @@ VER=${TAG#v}
 WORK=$(mktemp -d)
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
-FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py"
+FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh"
 
 echo "== build $TAG"
 git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
@@ -36,7 +36,7 @@ tar -C "$WORK/pkg" -czf "$DIST/$NAME" "facepipe-$VER"
 (cd "$DIST" && sha256sum "$NAME" > SHA256SUMS && cat SHA256SUMS)
 
 echo "== install into $APP"
-mkdir -p "$APP/.prev"
+mkdir -p "$APP/.prev/deploy" "$APP/deploy"
 for f in $FILES; do if [ -e "$APP/$f" ]; then cp -p "$APP/$f" "$APP/.prev/$f"; fi; done
 # copy next to the target, then rename: cp onto a running binary fails with "Text file busy"
 install_file() { cp -p "$1" "$2.new" && mv -f "$2.new" "$2"; }

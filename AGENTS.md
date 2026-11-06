@@ -39,6 +39,7 @@ make                       # facepipe and facepipe-enroll
 ./facepipe --selftest && python3 web.py --selftest
 ./facepipe --version
 sh deploy/deploy.sh vX.Y.Z <app_dir>   # release deploy with health check and automatic rollback
+sudo systemctl start facepipe-update    # automatic updates run this every 10 min (D-031)
 ```
 
 On the workstation (repo root):
@@ -50,7 +51,7 @@ sh ci/scan.sh              # run before every commit
 ## Rules
 
 - **Defend What You Ship:** code and its docs change in the same commit. New decision: a `D-0NN` entry in `docs/DECISIONS.md`. New bug: a write-up in `docs/bugs/`. User-visible change: a line in `CHANGELOG.md` under `[Unreleased]`. Keep the "Checked against the code of vX.Y.Z" stamp in `docs/FLOW.md` current. The README validation table says only what was really tested on hardware.
-- **Releases:** SemVer in `VERSION`, Keep a Changelog sections, tag `vX.Y.Z` only after CI is green on that exact commit; deploy with `deploy/deploy.sh`.
+- **Releases:** SemVer in `VERSION`, Keep a Changelog sections, tag `vX.Y.Z` only after CI is green on that exact commit. Publishing deploys it: the device's update timer picks it up within 10 minutes (D-031); `deploy/deploy.sh` by hand still works.
 - **Never commit:** `web_auth`, `rtsp_auth`, `facepipe.env`, `data/`, `gallery/`, models, engines, images, videos, event logs. `ci/scan.sh` enforces this, plus no private IPs and no `/home/<user>/` paths.
 - **Portable:** nothing in the repo may depend on one user's name, home folder, IP or camera. Use placeholders (`<app_dir>`, `CAMERA_IP`).
 - **Device safety:** never type or store passwords or tokens (the owner sets `web_auth`, `rtsp_auth` and runner tokens). Ask the owner before changing persistent system state (systemd units, sudoers, fstab, partitions, reboots). No Docker on the Nano. Mask IPs in anything shared.
