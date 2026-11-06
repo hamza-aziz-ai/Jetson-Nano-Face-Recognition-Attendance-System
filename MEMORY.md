@@ -1,11 +1,11 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-06 23:35 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
+Snapshot: **2026-11-07 00:10 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
 
 ## Versions
 
 - `main`: v1.0.3 (`92eaa15`) plus docs. Released: v1.0.0 to v1.0.3 (GitHub releases with assets and SHA256SUMS).
-- The device runs v1.1.1, deployed by its own update timer (D-031). v1.0.2 was never deployed (rolled back).
+- The device runs v1.2.0 (website + service control), deployed by its own update timer (D-031) on 2026-11-07 00:08 IST. v1.0.2 was never deployed (rolled back).
 
 ## Device
 
