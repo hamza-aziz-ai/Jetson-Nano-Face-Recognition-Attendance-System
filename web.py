@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.environ.get("FACEPIPE_DATA", "/mnt/ssd/facepipe/data")
+DATA = os.environ.get("FACEPIPE_DATA", os.path.join(HERE, "data"))
 GALLERY_DIR = os.path.join(os.environ.get("FACEPIPE_DIR", HERE), "gallery")
 GALLERY_TSV = os.environ.get("FACEPIPE_GALLERY", os.path.join(DATA, "gallery.tsv"))
 AUTH_FILE = os.environ.get("FACEPIPE_WEB_AUTH", os.path.join(HERE, "web_auth"))  # outside DATA, never served

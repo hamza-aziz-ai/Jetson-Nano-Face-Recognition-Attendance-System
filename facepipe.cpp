@@ -12,7 +12,7 @@
 // Preprocessing and alignment match InsightFace-REST (SCRFD (x-127.5)/128 RGB, ArcFace x/127.5-1 RGB,
 // ArcFace 5-point template, det 0.6, NMS 0.4) so embeddings compare with the CCTV gallery too.
 // Usage: facepipe <source> [width height]   e.g. facepipe rtsp://cam/stream 1920 1080 | facepipe csi:0 1920 1080
-// Env: FACEPIPE_DIR (configs, default .), FACEPIPE_DATA (default /mnt/ssd/facepipe/data),
+// Env: FACEPIPE_DIR (app dir with configs and models/, default .), FACEPIPE_DATA (default $FACEPIPE_DIR/data),
 //      FACEPIPE_GALLERY (default $FACEPIPE_DATA/gallery.tsv), FACEPIPE_MATCH (cosine threshold, default 0.5),
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
 //      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554).
@@ -60,8 +60,8 @@ static const int RETRY_GAP = 8;      // processed frames between attempts on the
 // w600k_r50 takes RGB. Until CCTV v2.15.2 (2026-11-06, PR #112) REST fed it BGR (TRT Arcface swapRB=False default)
 // and the gallery was BGR (Milvus _v4); set true only to match a pre-v2.15.2 REST/gallery.
 static const bool REC_BGR = false;
-static const char *REC_ENGINE = "/mnt/ssd/bench/r50_b16.plan";
-static const char *DET_ENGINE = "/mnt/ssd/bench/scrfd_384x640_b1.plan";
+// TensorRT engines live in $FACEPIPE_DIR/models (set in main)
+static std::string REC_ENGINE, DET_ENGINE;
 static const float ARC_DST[5][2] = {{38.2946f, 51.6963f}, {73.5318f, 51.5014f}, {56.0252f, 71.7366f},
                                     {41.5493f, 92.3655f}, {70.7299f, 92.2041f}};
 
@@ -527,7 +527,7 @@ static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dr
 
 static void rec_worker() {
   Engine rec;
-  rec.load(REC_ENGINE, nvinfer1::Dims4{1, 3, 112, 112});
+  rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   Gallery gal;
   while (true) {
     Job j;
@@ -833,8 +833,8 @@ static void start_rtsp() {
 // ---- enrollment: gallery_dir/<name>/<photo> -> GALLERY (written to a temp file, then renamed: live reload is safe) ----
 static int enroll(const std::string &root) {
   Engine det, rec;
-  det.load(DET_ENGINE, nvinfer1::Dims4{1, 3, NET_H, NET_W});
-  rec.load(REC_ENGINE, nvinfer1::Dims4{1, 3, 112, 112});
+  det.load(DET_ENGINE.c_str(), nvinfer1::Dims4{1, 3, NET_H, NET_W});
+  rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   std::string tmp = GALLERY + ".tmp";
   FILE *out = fopen(tmp.c_str(), "w");
   if (!out) { fprintf(stderr, "cannot write %s\n", tmp.c_str()); return 1; }
@@ -892,7 +892,10 @@ static int enroll(const std::string &root) {
 #endif
 
 int main(int argc, char **argv) {
-  DATA_DIR = env("FACEPIPE_DATA", "/mnt/ssd/facepipe/data");
+  std::string app_dir = env("FACEPIPE_DIR", ".");
+  DATA_DIR = env("FACEPIPE_DATA", app_dir + "/data");
+  REC_ENGINE = app_dir + "/models/r50_b16.plan";
+  DET_ENGINE = app_dir + "/models/scrfd_384x640_b1.plan";
   GALLERY = env("FACEPIPE_GALLERY", DATA_DIR + "/gallery.tsv");
   REC_DIR = env("FACEPIPE_REC", "/mnt/rec");
   MATCH = std::stof(env("FACEPIPE_MATCH", "0.5"));

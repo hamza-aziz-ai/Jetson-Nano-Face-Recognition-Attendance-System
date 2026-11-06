@@ -1,13 +1,13 @@
 [Unit]
 Description=facepipe attendance web page (port from facepipe.env)
 After=network-online.target
-RequiresMountsFor=/mnt/ssd
+RequiresMountsFor=/home
 
 [Service]
 User=hamza
-WorkingDirectory=/mnt/ssd/facepipe
-EnvironmentFile=/mnt/ssd/facepipe/facepipe.env
-ExecStart=/usr/bin/python3 /mnt/ssd/facepipe/web.py
+WorkingDirectory=/home/hamza/facepipe
+EnvironmentFile=/home/hamza/facepipe/facepipe.env
+ExecStart=/usr/bin/python3 /home/hamza/facepipe/web.py
 Restart=always
 RestartSec=10
 

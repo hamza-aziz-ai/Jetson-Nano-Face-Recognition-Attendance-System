@@ -99,11 +99,11 @@ Problems found and solved while building this, each verified on the device:
 
 ### Install
 
-1. Build the TensorRT engines on the Nano (the code expects `/mnt/ssd/bench/`; change `DET_ENGINE` and `REC_ENGINE` in `facepipe.cpp`, and the paths in `pgie_scrfd.txt`, for another location):
+1. Put the models in `models/` and build the TensorRT engines there, on the Nano itself:
    ```sh
-   trtexec --onnx=scrfd_10g_384x640.onnx --fp16 --workspace=1024 --saveEngine=/mnt/ssd/bench/scrfd_384x640_b1.plan
-   trtexec --onnx=w600k_r50.onnx --fp16 --workspace=1024 --minShapes=input.1:1x3x112x112 \
-     --optShapes=input.1:8x3x112x112 --maxShapes=input.1:16x3x112x112 --saveEngine=/mnt/ssd/bench/r50_b16.plan
+   cd models
+   trtexec --onnx=scrfd_10g_384x640.onnx --fp16 --workspace=1024 --saveEngine=scrfd_384x640_b1.plan
+   trtexec --onnx=w600k_r50.onnx --fp16 --workspace=1024 --minShapes=input.1:1x3x112x112      --optShapes=input.1:8x3x112x112 --maxShapes=input.1:16x3x112x112 --saveEngine=r50_b16.plan
    ```
 2. Build: `make all` (builds `facepipe` and `facepipe-enroll`, and copies the DeepStream sample IOU tracker config).
 3. Configure: `cp facepipe.env.example facepipe.env` and set the camera and paths.
@@ -149,6 +149,7 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | `facepipe.service`, `facepipe-web.service` | systemd units |
 | `check_vs_rest.py` | Verifies embeddings against an InsightFace-REST server |
 | `Makefile` | Builds both binaries |
+| `models/` | ONNX models and TensorRT engines (not in the repository) |
 
 ## Security and privacy
 

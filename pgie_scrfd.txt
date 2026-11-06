@@ -2,8 +2,9 @@
 # Normalisation matches InsightFace-REST: RGB, (x - 127.5) / 128, letterbox padded right/bottom.
 [property]
 gpu-id=0
-onnx-file=/mnt/ssd/bench/scrfd_10g_384x640.onnx
-model-engine-file=/mnt/ssd/bench/scrfd_384x640_b1.plan
+# paths are relative to this file's folder
+onnx-file=models/scrfd_10g_384x640.onnx
+model-engine-file=models/scrfd_384x640_b1.plan
 batch-size=1
 network-mode=2
 net-scale-factor=0.0078125
