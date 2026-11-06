@@ -17,3 +17,4 @@ Marked **seen** where it actually happened on the device, otherwise **from the c
 | Power loss at MAXN | Board resets | Uptime resets (**seen** once) | Services start on boot; fix: 5V 4A supply and fan |
 | External SSD missing | Formerly: services could not start (**seen**) | | App moved to the microSD; SSD no longer used |
 | Clock wrong | Events on the wrong day | Wrong times on the page | NTP keeps it synced; set `TZ` in `facepipe.env` if the system clock is UTC |
+| CSI camera daemon stalls the pipeline at start | No frames, process looks active | Watchdog log line `no frames for 60 s` (**seen** once, before the watchdog existed) | Watchdog exits, systemd restarts after 10 s; `deploy.sh` waits 3 s between stop and start |

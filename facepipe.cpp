@@ -16,7 +16,8 @@
 //      FACEPIPE_GALLERY (default $FACEPIPE_DATA/gallery.tsv), FACEPIPE_METRIC (cosine or l2, default cosine),
 //      FACEPIPE_MATCH (cosine threshold, default 0.5), FACEPIPE_L2_MATCH (L2 distance threshold, default 0.95),
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
-//      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554).
+//      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554),
+//      FACEPIPE_WATCHDOG (seconds without frames before exiting, default 60, 0 = off).
 // stdout: one JSON line per recognition attempt (with the embedding); stderr: logs.
 
 #include <gst/gst.h>
@@ -540,6 +541,29 @@ static FILE *json_out = stdout;  // real stdout; fd 1 is pointed at stderr so De
 static const size_t Q_MAX = 32;  // drop jobs if the GPU falls behind instead of growing memory
 static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0};
 
+// Frame watchdog: exit if no frame arrives for FACEPIPE_WATCHDOG seconds (default 60, 0 = off), so systemd restarts us.
+// A thread, not a GLib timer: the stall seen on 2026-11-06 happened while creating nvarguscamerasrc, before the main
+// loop ran, and a stalled process otherwise looks "active" to systemd forever.
+static void start_watchdog() {
+  int limit = std::atoi(env("FACEPIPE_WATCHDOG", "60").c_str());
+  if (limit <= 0) return;
+  std::thread([limit] {
+    long last = -1;
+    auto since = std::chrono::steady_clock::now();
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+      long f = n_frames;
+      auto now = std::chrono::steady_clock::now();
+      if (f != last) { last = f; since = now; continue; }
+      if (std::chrono::duration_cast<std::chrono::seconds>(now - since).count() >= limit) {
+        fprintf(stderr, "[facepipe] watchdog: no frames for %d s, exiting so the service restarts\n", limit);
+        fflush(stderr);
+        _exit(3);
+      }
+    }
+  }).detach();
+}
+
 static void rec_worker() {
   Engine rec;
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
@@ -977,6 +1001,7 @@ int main(int argc, char **argv) {
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
   fprintf(stderr, "[facepipe] version %s, processing every %u frame(s), match %s %s %.2f, data %s\n", FACEPIPE_VERSION,
           frame_step(), METRIC_L2 ? "L2" : "cosine", METRIC_L2 ? "<=" : ">=", METRIC_L2 ? L2_MATCH : MATCH, DATA_DIR.c_str());
+  start_watchdog();
   gst_init(&argc, &argv);
   std::thread worker(rec_worker);
 

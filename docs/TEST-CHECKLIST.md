@@ -24,6 +24,7 @@ The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG
 | --- | --- | --- |
 | Build | `make all` | No errors; `facepipe`, `facepipe-enroll`, `tracker.yml` exist |
 | Web self-test | `python3 web.py --selftest` | `selftest ok` |
+| Watchdog | `FACEPIPE_WATCHDOG=10 ./facepipe usb:/dev/video99 640 480` | `watchdog: no frames for 10 s, exiting` (seen 2026-11-06) |
 | Match rule | `./facepipe --selftest` | `selftest ok` (cosine and L2 thresholds, same closest photo for both) |
 | Version | `./facepipe --version` | the `VERSION` file's content; same in `data/status.json` and the dashboard footer |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |

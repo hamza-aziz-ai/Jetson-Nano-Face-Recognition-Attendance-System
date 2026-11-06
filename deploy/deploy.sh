@@ -42,15 +42,18 @@ install_file() { cp -p "$1" "$2.new" && mv -f "$2.new" "$2"; }
 for f in $FILES; do install_file "$f" "$APP/$f"; done
 if [ ! -e "$APP/tracker.yml" ]; then cp tracker.yml "$APP/"; fi
 
+# stop, give the Argus camera daemon a moment to release a CSI camera, then start (an immediate restart once stalled)
+restart_services() { sudo -n systemctl stop facepipe facepipe-web && sleep 3 && sudo -n systemctl start facepipe facepipe-web; }
+
 rollback() {
   echo "== ROLLBACK: restoring the previous version"
   for f in $FILES; do if [ -e "$APP/.prev/$f" ]; then install_file "$APP/.prev/$f" "$APP/$f"; fi; done
-  sudo -n systemctl restart facepipe facepipe-web
+  restart_services
   exit 1
 }
 
 echo "== restart and health check"
-sudo -n systemctl restart facepipe facepipe-web || rollback
+restart_services || rollback
 i=0
 while [ $i -lt 60 ]; do
   sleep 2; i=$((i + 2))

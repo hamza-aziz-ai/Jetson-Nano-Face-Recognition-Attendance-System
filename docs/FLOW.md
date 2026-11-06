@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.0.1 (2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.0.2 (2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
