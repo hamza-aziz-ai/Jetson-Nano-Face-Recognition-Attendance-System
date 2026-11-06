@@ -13,6 +13,94 @@ A standalone, fully offline face recognition attendance system that runs entirel
 
 It is built as a native C++ DeepStream application with custom TensorRT post-processing, and it uses all of the Nano's fixed-function video hardware: **NVDEC** to decode the camera, **NVJPG** for the live view and evidence images, and **NVENC** for the RTSP stream and event clips.
 
+## System Design
+
+How to read it: solid arrows are the path every face takes, dotted arrows are side writes; blue is the entry point, green a step, amber a decision, purple an outcome, red an error path, grey stored data ([legend](docs/FLOW.md#how-to-read-the-diagrams)). Numbers match the notes below.
+
+```mermaid
+flowchart TB
+  CAM["`(1) **Camera**: RTSP, file, USB or CSI`"]:::entry --> DROP["`(2) Keep every Nth frame`"]:::step
+  DROP --> DET["`(3) **SCRFD-10G** detects faces and 5 landmarks`"]:::step
+  DET --> TRK["`(4) **IOU tracker** gives each face a track ID`"]:::step
+  TRK --> DUE{"`(5) Attempt due for this track?`"}:::decision
+  DUE -->|"`no`"| OSD["`(11) Boxes and names drawn on video`"]:::step
+  DUE -->|"`yes`"| EMB["`(6) Align 112x112, **ArcFace** embedding`"]:::step
+  EMB --> MATCH{"`(7) Cosine against the gallery at least 0.5?`"}:::decision
+  MATCH -->|"`yes`"| KNOWN["`(8) Known: name and score`"]:::outcome
+  MATCH -->|"`no`"| TRIES{"`5 tries used?`"}:::decision
+  TRIES -->|"`no, retry later`"| DUE
+  TRIES -->|"`yes`"| UNK["`Unknown`"]:::error
+  KNOWN --> EVT[("`(9) Attendance event and face snapshot`")]:::store
+  UNK --> EVT
+  KNOWN -.->|"`clip and evidence frame`"| REC[("`(10) Recordings volume`")]:::store
+  UNK -.->|"`clip and evidence frame`"| REC
+  OSD -->|"`NVJPG`"| LIVE["`Live view`"]:::outcome
+  OSD -->|"`NVENC`"| RTSP["`RTSP stream`"]:::outcome
+  EVT --> WEB["`(12) **Dashboard**: present, absent, unknown, CSV`"]:::outcome
+  REC --> WEB
+  classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+  classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef decision fill:#fef3c7,stroke:#b45309,color:#78350f
+  classDef outcome fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef error fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+  classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
+```
+
+1. **Camera input.** `FACEPIPE_URI` selects an RTSP camera (forced to TCP), a video file, a USB camera (MJPEG decoded on NVJPG) or a CSI camera (Argus ISP). Decoding runs on the hardware decoders, not the CPU.
+2. **Frame thinning.** Only every Nth frame enters the pipeline (`FACEPIPE_DROP`, default 2: 15 fps from a 30 fps camera). The GPU tops out at about 19 fps of detection (D-007).
+3. **Detection.** SCRFD-10G runs at 640x384 in TensorRT FP16. A custom decoder keeps the 5 facial landmarks that alignment needs, with score 0.6 and NMS 0.4 (D-002, D-006).
+4. **Tracking.** The IOU tracker follows each face, so a person is recognized once per visit, not once per frame (D-004).
+5. **Attempt rule.** A track gets a recognition attempt when it is not done, nothing is pending, the face is at least 40 px wide and 8 frames have passed since its last try (D-005).
+6. **Embedding.** The face is aligned to the ArcFace 5-point template and `w600k_r50` turns it into 512 numbers, in RGB (D-008).
+7. **Match.** The best cosine similarity against every enrolled photo must reach `FACEPIPE_MATCH`, default 0.5 (D-018). Below it, the track is retried up to 5 times, then recorded as Unknown.
+8. **Known.** The label turns green with the name and score. The gallery reloads by itself after enrollment.
+9. **Attendance record.** One JSON line per visit goes into the day's `events-YYYY-MM-DD.jsonl`, with a 112x112 face snapshot (D-009).
+10. **Evidence.** A clip from 3 s before to 5 s after the event (NVENC) and a full-frame image with the name drawn (NVJPG) go to the recordings volume, which drops its oldest week at 90% full (D-014, D-015). If the volume is missing, the event is still recorded without them.
+11. **Live video.** Every frame is drawn with boxes and labels (amber while recognizing, green known, red unknown) for the dashboard live view, encoded only while someone watches, and for the RTSP stream; both need a login (D-011, D-012).
+12. **Dashboard.** The web page shows who is present, absent and unknown for any day, with evidence links, live status and CSV export.
+
+Each step is traced to the code in [docs/FLOW.md](docs/FLOW.md).
+
+## Solution Architecture
+
+How to read it: solid arrows are the path every change takes, red boxes are the failure and rollback paths; colours as above. Numbers match the notes below.
+
+```mermaid
+flowchart TB
+  DEV["`(1) **Commit** with docs and a CHANGELOG line`"]:::entry --> CI["`(2) **CI**: scan, docs check, Python 3.6 self-test, JetPack compile, cppcheck, diagrams`"]:::step
+  CI --> GREEN{"`(3) All jobs green?`"}:::decision
+  GREEN -->|"`no`"| FIX["`Fix and push again`"]:::error
+  FIX --> CI
+  GREEN -->|"`yes`"| MAIN["`(4) main`"]:::outcome
+  MAIN --> TAG["`(5) **Tag vX.Y.Z** matching VERSION and CHANGELOG`"]:::step
+  TAG --> REL["`(6) **Release workflow**: full CI again, tag check, GitHub Release`"]:::step
+  REL --> DEPLOY["`(7) **Deploy**: copy to the Nano, make all, restart services`"]:::step
+  DEPLOY --> NANO["`(8) **Jetson Nano**: facepipe and facepipe-web under systemd`"]:::outcome
+  MODELS[("`(9) Models: TensorRT engines built on the device`")]:::store --> NANO
+  NANO --> DATA[("`(10) microSD: data, gallery, recordings volume`")]:::store
+  NANO -.->|"`bad release`"| BACK["`(11) Deploy the previous tag`"]:::error
+  classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+  classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
+  classDef decision fill:#fef3c7,stroke:#b45309,color:#78350f
+  classDef outcome fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef error fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+  classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
+```
+
+1. **Change.** Every change updates the affected docs and adds a line under `[Unreleased]` in `CHANGELOG.md` in the same commit.
+2. **CI.** GitHub Actions runs on every push and pull request: a scan that blocks secrets, private IPs and biometric files; a docs-with-code check; the web self-test on Python 3.6 (the version on the Nano); a `-Werror` compile of both binaries against checksum-pinned JetPack 4.6 headers, plus cppcheck; and a render of every Mermaid diagram (D-020 to D-022).
+3. **Gate.** A red job blocks the change. CI caught a real bug this way: an enrollment file leak and crash (`docs/bugs/enroll-leak-and-crash.md`).
+4. **Main.** Only green commits are released.
+5. **Version.** The `VERSION` file follows Semantic Versioning and is compiled into the binaries, `status.json` and the dashboard footer (D-023).
+6. **Release.** Pushing a `vX.Y.Z` tag reruns the full CI, checks that the tag matches `VERSION` and has a changelog section, and publishes the GitHub Release with those notes.
+7. **Deploy.** The release is copied to the Nano and built there with `make all`, which links against the JetPack libraries on the device; then the two systemd services restart.
+8. **On the device.** `facepipe` (pipeline) and `facepipe-web` (dashboard) run under systemd, restart on failure and reconnect to the camera.
+9. **Models.** TensorRT engines are built on the Nano itself with `trtexec`, because an engine is tied to the GPU and TensorRT version it was built on.
+10. **Storage.** Code, models, data and the gallery live on the microSD; clips and evidence go to a size-capped 64 GB volume.
+11. **Rollback.** Releases are never edited; going back means deploying the previous tag (`docs/ROLLBACK.md`).
+
+Who owns which part, the ports and the data locations are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Highlights
 
 - **Real-time on a 5-10 W board:** 15 fps end to end on a 1080p camera, with detection on every processed frame.
@@ -34,28 +122,6 @@ It is built as a native C++ DeepStream application with custom TensorRT post-pro
 | Live video | On-screen boxes and names (`nvdsosd`); MJPEG live view in the dashboard, encoded only while someone is watching; RTSP stream for VLC or an NVR |
 | Dashboard | Present / absent / unknown per day, live status, search and sort, CSV export, print layout; Python standard library only, works offline |
 | Security | PBKDF2-hashed dashboard login, separate RTSP login, Content-Security-Policy with per-response nonces, no secrets in the repository |
-
-## Architecture
-
-```mermaid
-flowchart TD
-  SRC["`**Source**: RTSP or file (NVDEC), CSI (Argus ISP), USB (NVJPG decode)`"]:::entry --> DROP["`keep every Nth frame`"]:::step
-  DROP --> MUX["`nvstreammux`"]:::step --> DET["`nvinfer: SCRFD-10G 640x384, raw tensors`"]:::step
-  DET --> P1["`probe: decode boxes and landmarks`"]:::step --> TRK["`nvtracker (IOU)`"]:::step
-  TRK --> P2["`probe: label, align 112x112`"]:::step --> OSD["`nvdsosd: boxes and names`"]:::step
-  P2 -. "`queue`" .-> REC["`recognition worker: ArcFace w600k_r50, gallery match`"]:::step
-  REC --> LOG[("`attendance events and snapshots`")]:::store
-  OSD --> JPG["`nvjpegenc (NVJPG)`"]:::step --> LIVE["`live view, evidence frames`"]:::outcome
-  OSD --> ENC["`nvv4l2h264enc (NVENC)`"]:::step --> OUT["`RTSP stream, event clips (mp4)`"]:::outcome
-  LOG --> WEB["`web dashboard`"]:::outcome
-  LIVE --> WEB
-  classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
-  classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
-  classDef outcome fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
-  classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
-```
-
-Blue: source, green: processing, purple: outputs, grey: stored data. The [flows](docs/FLOW.md) trace each step to the code.
 
 ## Performance
 

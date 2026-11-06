@@ -1,5 +1,7 @@
 # Flows
 
+Checked against the code on `main` at b23e552 (v0.9.0, 2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
+
 ## How to read the diagrams
 
 Each section has a diagram, a key that maps names to code, and a numbered trace. The number in a box, written `(n)`, or the number on a sequence arrow, matches step n of the trace. Colours as in ARCHITECTURE.md: blue entry, green step, amber decision, purple outcome, red error, grey data store or service this project does not write. Solid arrows are in use; dotted arrows are optional or switched off.

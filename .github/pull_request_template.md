@@ -2,7 +2,7 @@
 
 ## Docs and diagrams
 
-- [ ] Which `docs/FLOW.md` and `docs/ARCHITECTURE.md` sections (and README diagram) did this change touch? Updated in this PR:
+- [ ] README System Design / Solution Architecture, `docs/FLOW.md`, `docs/ARCHITECTURE.md`: updated, or not affected (say which sections):
 - [ ] DECISIONS / ASSUMPTIONS / TEST-CHECKLIST / HANDOVER updated where affected
 - [ ] Real test output pasted below (device or CI)
 

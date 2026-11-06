@@ -216,3 +216,8 @@ Trade-off: Two places to edit when releasing (VERSION and CHANGELOG), checked by
 Revisit if: releases become frequent enough to automate the bump.
 
 The first release is 0.9.0, not 1.0.0: 1.0.0 is reserved for when every item in the README validation table is verified on hardware.
+
+## D-024: README System Design and Solution Architecture
+Chosen: two README sections right after the introduction, following the owner's other repositories (CCTV and HalalLens): System Design traces one face from camera to attendance record, Solution Architecture traces a change to the running device. Each has one top-to-bottom Mermaid diagram with numbered nodes, a how-to-read line, numbered notes with bold lead-ins naming real settings and decision IDs, and a link to the detailed doc. FLOW.md and ARCHITECTURE.md hold the detail and win when they disagree with the README.
+Why: A reader sees the runtime path and the delivery path in two minutes, without file paths.
+Trade-off: Three places to keep in sync; the pull-request template asks about all three, CI renders the diagrams, and FLOW.md records the commit it was last checked against. Only what exists on main is drawn; planned work lives in HANDOVER.md. No versions of other components are named in README notes.

@@ -49,8 +49,8 @@ flowchart LR
   CI --> OK{"`All green?`"}:::decision
   OK -->|"`no`"| FIX["`Fix and push again`"]:::error
   OK -->|"`yes`"| MAIN["`main`"]:::outcome
-  MAIN --> MANUAL["`Copy to the Nano, make all, restart services`"]:::step
-  MAIN -. "`tag v*, not built yet`" .-> RUNNER["`Self-hosted runner on the Nano: build, test, swap, rollback`"]:::step
+  MAIN --> TAG["`Tag vX.Y.Z: release workflow reruns CI, publishes GitHub Release`"]:::step
+  TAG --> MANUAL["`Copy to the Nano, make all, restart services`"]:::step
   classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
   classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
   classDef decision fill:#fef3c7,stroke:#b45309,color:#78350f
@@ -58,7 +58,7 @@ flowchart LR
   classDef error fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
 ```
 
-Today deploys are manual (copy, `make all`, restart). The tag-driven self-hosted runner is the owner's chosen design and is drawn dotted until it exists.
+Deploys are manual today (copy, `make all`, restart); the release workflow and versioning are in docs/RELEASING.md. Planned work is not drawn here; it is listed in HANDOVER.md.
 
 ## Hardware blocks used
 
