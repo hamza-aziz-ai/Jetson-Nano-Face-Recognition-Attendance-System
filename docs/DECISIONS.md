@@ -421,3 +421,10 @@ Chosen, agreed with Codex in a council (3 exchanges). Model: Claude Opus 5.5 wit
 Rejected: putting the role in the cookie without a version (an old admin cookie would work again after demote and re-promote); a fixed 15-minute account lockout (anyone could keep a family member out); assuming +91 for 10-digit numbers (the repository must not depend on one owner's country); Host-based links (a request can name any host); automatic sign-in after setting a password; self-service password reset (no channel to verify a person).
 Trade-off: viewers see strangers' faces too (owner's choice); sign-in names are not verified; a password alone protects internet access; repeated wrong passwords can still delay a person's sign-in by up to 30 s; plain HTTP on the home network.
 Revisit if: viewers should see only some people, accounts need a second factor, or the site leaves the owner's family.
+
+## D-041: RTSP for the local network only (owner)
+Owner, 2026-11-07, after opening the RTSP stream from the internet: "user can open it on VLC but only if the user is in local network not via the internet"; from the internet the live picture is for the website only.
+Chosen: the RTSP server refuses (403) every request from an address that is not private, link-local or loopback; the RTP input listens on `127.0.0.1`; the Live page shows the RTSP address only to local visitors. The website's MJPEG view (signed in, sessions checked every 3 s) is the only way to watch from the internet.
+Why: owner's decision on exposure. Binding to the local interface alone would not stop a router port forward (it delivers to the local address); checking the sender's address does.
+Trade-off: a viewer on a VPN into the home network counts as local; the RTSP login still travels in plain text on the local network.
+Revisit if: an NVR outside the home must record the stream.

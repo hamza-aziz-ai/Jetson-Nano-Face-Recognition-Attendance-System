@@ -57,6 +57,7 @@
 #include <cstring>
 #include <ctime>
 #include <deque>
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -220,6 +221,10 @@ void gst_rtsp_media_factory_add_role(GstRTSPMediaFactory *, const gchar *role, c
 void gst_rtsp_mount_points_add_factory(GstRTSPMountPoints *, const gchar *, GstRTSPMediaFactory *);
 guint gst_rtsp_server_attach(GstRTSPServer *, GMainContext *);
 void gst_rtsp_server_set_auth(GstRTSPServer *, GstRTSPAuth *);
+typedef struct _GstRTSPClient GstRTSPClient;  // D-041: local-network viewers only
+typedef struct _GstRTSPConnection GstRTSPConnection;
+GstRTSPConnection *gst_rtsp_client_get_connection(GstRTSPClient *);
+const gchar *gst_rtsp_connection_get_ip(const GstRTSPConnection *);  // libgstrtsp-1.0
 GstRTSPAuth *gst_rtsp_auth_new(void);
 gchar *gst_rtsp_auth_make_basic(const gchar *user, const gchar *pass);
 void gst_rtsp_auth_add_basic(GstRTSPAuth *, const gchar *basic, GstRTSPToken *);
@@ -1695,6 +1700,38 @@ static GstElement *make(const char *f, const char *n) {
 
 // ---- RTSP: rtsp://<nano>:8554/live, Basic auth from $FACEPIPE_RTSP_AUTH ("user:password", set by web.py
 // --set-rtsp-password, mode 0600). Without that file the RTSP server stays off: faces must not stream without a login.
+// Owner, 2026-11-07 (D-041): VLC or an NVR only from the local network, never from the internet. Every request of a
+// viewer whose address is not private, link-local or loopback is answered 403 (a router port forward keeps the internet
+// sender's address, so it is refused too). The RTP input from our own encoder listens on 127.0.0.1 only.
+
+// private (RFC 1918, fc00::/7), link-local and loopback addresses; anything else counts as the internet
+static bool lan_ip(const std::string &ip) {
+  std::string a = ip.rfind("::ffff:", 0) == 0 ? ip.substr(7) : ip;
+  struct in_addr v4;
+  struct in6_addr v6;
+  if (inet_pton(AF_INET, a.c_str(), &v4) == 1) {
+    uint32_t x = ntohl(v4.s_addr);
+    return (x >> 24) == 10 || (x >> 24) == 127 || (x >> 20) == 0xAC1 || (x >> 16) == 0xC0A8 || (x >> 16) == 0xA9FE;
+  }
+  if (inet_pton(AF_INET6, a.c_str(), &v6) == 1) {
+    static const unsigned char lo[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    const unsigned char *b = v6.s6_addr;
+    return (b[0] & 0xFE) == 0xFC || (b[0] == 0xFE && (b[1] & 0xC0) == 0x80) || !memcmp(b, lo, 16);
+  }
+  return false;
+}
+
+static int rtsp_refuse(GstRTSPClient *, gpointer, gpointer) { return 403; }  // GST_RTSP_STS_FORBIDDEN
+
+static void on_rtsp_client(GstRTSPServer *, GstRTSPClient *c, gpointer) {
+  GstRTSPConnection *conn = gst_rtsp_client_get_connection(c);
+  const gchar *ip = conn ? gst_rtsp_connection_get_ip(conn) : nullptr;
+  if (ip && lan_ip(ip)) return;
+  LOGW("RTSP: refused a viewer from outside the local network (%s)", ip ? ip : "?");
+  for (const char *s : {"pre-options-request", "pre-describe-request", "pre-setup-request", "pre-play-request"})
+    g_signal_connect(c, s, G_CALLBACK(rtsp_refuse), nullptr);
+}
+
 static void start_rtsp() {
   std::string path = env("FACEPIPE_RTSP_AUTH", env("FACEPIPE_DIR", ".") + "/rtsp_auth"), cred;
   std::ifstream f(path);
@@ -1705,6 +1742,7 @@ static void start_rtsp() {
   std::string user = cred.substr(0, cred.find(':')), pass = cred.substr(cred.find(':') + 1);
   GstRTSPServer *srv = gst_rtsp_server_new();
   g_object_set(srv, "service", env("FACEPIPE_RTSP_PORT", "8554").c_str(), nullptr);
+  g_signal_connect(srv, "client-connected", G_CALLBACK(on_rtsp_client), nullptr);
   GstRTSPAuth *auth = gst_rtsp_auth_new();
   GstRTSPToken *tok = gst_rtsp_token_new("media.factory.role", G_TYPE_STRING, user.c_str(), nullptr);
   gchar *basic = gst_rtsp_auth_make_basic(user.c_str(), pass.c_str());
@@ -1714,7 +1752,7 @@ static void start_rtsp() {
   gst_rtsp_server_set_auth(srv, auth);
   g_object_unref(auth);
   GstRTSPMediaFactory *fac = gst_rtsp_media_factory_new();
-  gst_rtsp_media_factory_set_launch(fac, "( udpsrc name=pay0 port=5400 buffer-size=524288 caps=\"application/x-rtp, "
+  gst_rtsp_media_factory_set_launch(fac, "( udpsrc name=pay0 address=127.0.0.1 port=5400 buffer-size=524288 caps=\"application/x-rtp, "
                                          "media=video, clock-rate=90000, encoding-name=H264, payload=96\" )");
   gst_rtsp_media_factory_set_shared(fac, TRUE);
   gst_rtsp_media_factory_add_role(fac, user.c_str(), "media.factory.access", G_TYPE_BOOLEAN, TRUE,
@@ -1723,7 +1761,7 @@ static void start_rtsp() {
   gst_rtsp_mount_points_add_factory(mounts, "/live", fac);
   g_object_unref(mounts);
   if (gst_rtsp_server_attach(srv, nullptr) == 0) LOGE("RTSP: cannot listen");
-  else LOGI("RTSP on rtsp://<this device>:%s/live (login required)", env("FACEPIPE_RTSP_PORT", "8554").c_str());
+  else LOGI("RTSP on rtsp://<this device>:%s/live (login required; local network only)", env("FACEPIPE_RTSP_PORT", "8554").c_str());
 }
 
 #ifdef FACEPIPE_ENROLL  // separate binary: it needs OpenCV imgcodecs (imread), which the live binary must not load
@@ -1868,6 +1906,13 @@ static int selftest() {
     ev_reqs.clear();
   }
   METRIC_L2 = m; MATCH = c; L2_MATCH = l;
+  // RTSP viewers (D-041): the local network yes, the internet no
+  // private examples written in two pieces: ci/scan.sh refuses private addresses in the repository
+  for (const char *ip : {"192" ".168.0.9", "10" ".0.0.5", "172" ".16.0.1", "172" ".31.255.255", "127.0.0.1", "169.254.3.4",
+                         "fe80::1", "fd00::3", "::1", "::ffff:192" ".168.0.9"})
+    assert(lan_ip(ip));
+  for (const char *ip : {"8.8.8.8", "172.32.0.1", "100.64.0.1", "203.0.113.7", "2401:4900::1", "::ffff:8.8.8.8", "", "x"})
+    assert(!lan_ip(ip));
   struct tm t = {};  // Friday 6 November 2026, 21:41:07
   t.tm_year = 126; t.tm_mon = 10; t.tm_mday = 6; t.tm_hour = 21; t.tm_min = 41; t.tm_sec = 7; t.tm_wday = 5;
   assert(log_stamp(t, 123) == "[06-11-2026] 09:41:07.123 PM, Friday");

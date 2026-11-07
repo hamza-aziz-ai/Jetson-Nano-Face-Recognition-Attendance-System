@@ -14,7 +14,7 @@ flowchart LR
   FP --> DATA[("`data/: gallery.tsv, events-YYYY-MM-DD.jsonl, snaps/, status.json`")]:::store
   FP --> REC[("`/mnt/rec: event clips and evidence frames`")]:::store
   FP --> SHM[("`/dev/shm/facepipe: live.jpg`")]:::store
-  FP -->|"`RTSP 8554, login`"| VLC["`VLC or NVR`"]:::entry
+  FP -->|"`RTSP 8554, login, local network only (D-041)`"| VLC["`VLC or NVR`"]:::entry
   BROWSER["`Browser`"]:::entry -->|"`HTTP 8000, login`"| WEB["`facepipe-web (systemd facepipe-web.service)`"]:::step
   WEB --> DATA
   WEB --> REC

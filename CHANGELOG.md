@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-11-07
+
+### Security
+
+- The RTSP stream (`rtsp://...:8554/live`) accepted any viewer that could reach the device, also from the internet (owner's report). Now only the local network may watch it in VLC or an NVR: every request from an address that is not private, link-local or loopback is answered 403 Forbidden, which also covers a router port forward. Its internal video input listens on the device only. The Live page shows the RTSP address only to visitors on the local network (D-041, bugs/rtsp-reachable-from-internet.md).
+
 ## [1.10.0] - 2026-11-07
 
 ### Added
