@@ -4,12 +4,12 @@ Last good commit: see `git log`; every commit on `main` has been deployed and ru
 
 ## Automatic
 
-`deploy/deploy.sh` keeps the previous files in `<app_dir>/.prev/` and restores them, then restarts the services, if the new version is not running and reporting itself in `status.json` within 60 s.
+`deploy/deploy.sh` keeps the previous files in `<app_dir>/.prev/` and restores them, then restarts the services, if the new version is not running and reporting itself in `status.json` within 60 s. `.prev` holds what was installed, so since v1.13.0 that is `webapp.so` and the two-line `web.py`, not source (D-043).
 
 ## Code
 
 1. `git revert <commit>` (or `git checkout <commit> -- <file>`), push.
-2. On the Nano: `sh deploy/deploy.sh vX.Y.Z <app_dir>` for a release, or copy the files into the app folder, `make all`, `sudo systemctl restart facepipe facepipe-web`.
+2. On the Nano: `sh deploy/deploy.sh vX.Y.Z <app_dir>` for a release, or copy the files into the app folder, `make all`, `sh deploy/compile-web.sh` (the device runs `webapp.so`, not `web.py`, D-043), `sudo systemctl restart facepipe facepipe-web`.
 
 ## Services
 

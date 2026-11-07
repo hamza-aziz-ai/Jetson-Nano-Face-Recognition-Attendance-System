@@ -15,7 +15,7 @@ Added 2026-11-06 at the owner's request ("Do not put everything in just one webp
 - **Client address:** `client_ip()` uses `CF-Connecting-IP` only when the connection comes from this host (cloudflared); a LAN client cannot set it.
 - **Messages:** the System page shows fixed messages chosen by a key in the URL; no request text is reflected into a page.
 
-Proof: `python3 web.py --selftest` starts a real server on a free port and checks login, all five pages with their CSP, HTML escaping of a hostile name, Range, and that a POST is refused without `Origin`, with a wrong token, from another site, with an unknown action and when too large. On the Nano, a second instance on port 8001 with the real data served all pages, and its Restart button restarted the live service through the sudoers rule (clean stop in 3 s, active again). See TEST-CHECKLIST.
+Deployed, the website is `webapp.so` with a two-line `web.py` that starts it (D-043); the commands and behaviour are unchanged. Proof: `python3 web.py --selftest` starts a real server on a free port and checks login, all five pages with their CSP, HTML escaping of a hostile name, Range, and that a POST is refused without `Origin`, with a wrong token, from another site, with an unknown action and when too large. On the Nano, a second instance on port 8001 with the real data served all pages, and its Restart button restarted the live service through the sudoers rule (clean stop in 3 s, active again). See TEST-CHECKLIST.
 
 ## Recognition state (v1.11.0, owner)
 

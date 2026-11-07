@@ -1,52 +1,40 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`).
+Snapshot: **2026-11-07 11:55 PM IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`). Finished work lives in `CHANGELOG.md`, the reasoning in `docs/DECISIONS.md`, past sessions in `docs/HANDOVER.md`.
 
 ## Versions
 
-- `main`: v1.13.7 (pages follow a start or stop of recognition without a manual refresh; v1.13.6 token messages no longer assert the repository's visibility; v1.13.5 deploy no longer leaves the source in /tmp; v1.13.4 health warning starts at 90 C, above this board's normal 81 C under recognition; v1.13.3 each temperature sensor judged against its own limits, AO is not critical until 110 C; v1.13.2 health warning names heat or memory and what to do; v1.13.1 private repository: updates read a read-only token from gh_token, D-044; v1.13.0 website ships compiled as webapp.so, D-043; favicon shipped and missing files answer 404; v1.12.3 open pages switch to the maintenance page by themselves; Worker routes add uploads, users, account; v1.12.2 Cameras form fields stay in their column; v1.12.1 USB camera saved by its by-id path; v1.12.0 unknown faces only from a clear view, D-042, limits to calibrate on the owner's face; v1.11.3 match numbers name their rule; v1.11.2 numbers follow the rule; v1.11.0 recognition state banner; v1.10.1 RTSP local network only, D-041; v1.10.0 user accounts, D-040; v1.9.0 two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
-- Camera in use: the owner's phone over RTSP (chosen on the Cameras page); face matching L2 <= 0.90 (System page).
+- `main`: **v1.13.7**, deployed and healthy on the Nano (`facepipe 1.13.7 at 199 frames after 22 s`). Releases are made by the workflow when a merged change raises `VERSION`; the device's update timer (D-031) deploys each one within 10 minutes.
+- This version: pages follow a start or stop of recognition without a manual refresh.
+- Earlier in v1.13: token messages no longer assert the repository's visibility (.6); a deploy no longer leaves the source in `/tmp` (.5, `docs/bugs/deploy-left-source-in-tmp.md`); the health warning starts at 90 °C, above the 81 °C this board reaches while simply running (.4); each temperature sensor is judged against its own limits, AO is not critical until 110 °C (.3); the warning names heat or memory and what to do (.2); a private repository is read with a token from `gh_token` (.1, D-044); the website ships compiled as `webapp.so` and a missing file answers 404 (.0, D-043, `docs/bugs/favicon-missing-500.md`).
+- Before that: open pages switch to the maintenance page by themselves (v1.12.3); USB cameras saved by their by-id path (v1.12.1); unknown faces only from a clear view (v1.12.0, D-042); the recognition banner (v1.11.0); RTSP on the local network only (v1.10.1, D-041); user accounts (v1.10.0, D-040); two cameras and video upload (v1.9.0, D-039); the sign-in page (v1.8.0, D-036).
 
-## Device
+## What runs on the device now
 
-- Jetson Nano 4 GB, JetPack 4.6.6, app on the microSD, camera `csi:0` (Raspberry Pi HQ camera, IMX477, R8 removed). USB webcam on `/dev/video1`; a phone RTSP camera is also available.
-- Measured with no face in view: GPU 89-99 %, CPU about 33 % per core, RAM 2.7 of 3.96 GB, 13-15 fps processed (every 2nd frame).
+- Jetson Nano 4 GB, JetPack 4.6.6, app on the microSD at `~/facepipe`. Both services active; recognition at about 14.8 fps on the owner's **phone over RTSP** (chosen on the Cameras page). Face matching L2 ≤ 0.90. A USB webcam and the CSI camera are also available; a USB camera is saved by its `/dev/v4l/by-id/...` path.
+- The website runs as `webapp.so` with a two-line `web.py` that starts it (D-043). There is **no source on the device**: no `.cpp`, no `.py` beyond that stub, no `__pycache__`, and `.prev` holds compiled files. A deploy compiles on the device, which needs Nuitka 4.3.4 and takes 5 m 40 s idle, about 7 m 30 s while recognition runs.
+- Credentials: `web_auth`, `rtsp_auth` and `data/cameras.json` (all 0600), plus `gh_token` (0600, fine-grained, one repository, Contents: read) for updates while the repository is private. The owner's SSH key, the `gh` login and the `NVIDIA-SDK-Manager` key were removed on 2026-11-07; `authorized_keys` keeps two keys.
+- Heat: AO about 87 °C and CPU about 81 °C while recognition runs, which is normal for this board (the CPU throttles at 97 °C). `soctherm: OC ALARM` appears because it runs from a phone charger over micro-USB.
 - The installed systemd units predate `deploy/install.sh`; re-run the installer only with the owner's approval.
 
-## In progress
+## Remote access (D-035, D-036, D-037)
 
-1. **v1.0.3 released and deployed (healthy after 14 s, 14 fps).** Contents: daily log files in the owner's layout (D-030), clean bounded SIGTERM shutdown and watchdog fix (D-029), deploy health on the current `MainPID` with advancing frames, clip finalization result logged, 12-hour times on the web page. Verified on the Nano in a test instance: self-tests, log file format, clean stop in 2.7 s. CSI stall cause found: a killed camera process wedges nvargus-daemon (`SCF: Error Timeout`, then `InvalidState` for every client) until the daemon is restarted (docs/bugs/csi-start-stall.md). Still to do: restart after 20 min and after hours of CSI capture.
-2. **Empty/short clips: cause found and fixed in v1.1.2** (IDR only every 256 frames; idrinterval=15). PR fix/clip-preroll.
-3. **v1.1.0: adaptive detection (D-028), this commit.** Own SCRFD probe replacing nvinfer; same results as nvinfer on identical frames; empty scene 15 fps, 2.4 detections/s, GPU about 0%. Still to measure with a face present (owner): fps and delivery gaps during recognition.
-
-4. **v1.1.1: automatic deployment (D-031)**, owner chose a pull timer over the GitHub runner: `facepipe-update.timer` every 10 min runs `deploy/update.sh`. Units must be installed on the owner's Nano with approval of the exact files.
-5. **Website plan agreed with Codex (D-033):** v1.2 site + service control (built in PR feat/website-v1.2; sudoers rule installed on the owner's Nano with approval), v1.3 registration with safe gallery publication, v1.4 uploads after a capacity test, v1.5 two cameras. First: empty-clip bug and active-face cadence (owner in front of the camera).
-6. **PR practice (D-032):** code via branch + PR with auto-merge on the 5 CI checks; docs straight to main with [skip ci]; releases by the workflow when a merged change raises VERSION. PR #1 merged that way.
-
-## Owner decisions 2026-11-07 (D-034)
-
-- Next work, in this order: registration by invitation (v1.3, built in PR feat/registration), then the Cameras page (v1.4, built in PR feat/cameras), then (owner moved it forward) the website redesign v1.5.0; still to do: two RTSP cameras at once, then video upload.
-- Registration: invitation link only (single use, 48 h), admin approval; rejected photos deleted at once, unreviewed after 7 days; client IP only in the web log.
-
-## Redesign (owner, 2026-11-07), done in v1.5.0 (PR feat/web-redesign); the backlog below was addressed
-
-- Registration page: the form uses half the card width; the file input is the browser's plain "Choose Files"; the consent checkbox and text look unaligned; no photo previews before sending.
-- People page: cards were cramped (fixed in v1.4.1); generally tighten spacing, typography and button styles across pages.
-- Footer says "no data leaves this device": must change if remote access through Cloudflare is added.
-
-## Remote access (D-035, D-036, D-037), 2026-11-07
-
-- Tunnel `attendance.hamzaaziz.dev` is live (cloudflared-facepipe enabled by the owner; token in `/etc/cloudflared/facepipe-tunnel.env`, never read or print it). Route: `http://localhost:8000`.
-- Owner removed Cloudflare Access: the site's own sign-in page is the only lock. Owner told the password must be strong.
-- Maintenance page: Worker `facepipe-maintenance` deployed with the owner's `wrangler login` on the page routes (`sh deploy/maintenance/deploy.sh attendance.hamzaaziz.dev`).
+- Tunnel `attendance.hamzaaziz.dev` is live (`cloudflared-facepipe`; token in `/etc/cloudflared/facepipe-tunnel.env`, never read or print it). Route: `http://localhost:8000`.
+- Cloudflare Access was removed at the owner's request: the site's own sign-in page is the only lock, so the password must be strong.
+- Maintenance page: Worker `facepipe-maintenance` on the page routes (`sh deploy/maintenance/deploy.sh attendance.hamzaaziz.dev`), re-deployed on 2026-11-07 to cover Uploads, Users and Account.
+- The repository is **public at the moment**; the owner switches it private when they choose. Updates work either way: public needs no token, private uses `gh_token`.
 
 ## Next (owner)
 
-1. After v1.10.0 deploys: add `FACEPIPE_PUBLIC_URL=https://attendance.hamzaaziz.dev` to the Nano's `facepipe.env` (owner approved 2026-11-07) and restart facepipe-web; owner uploads the social preview PNG on GitHub (Settings, Social preview).
-2. Reconnect test of two cameras: the owner switches the phone stream off and on (needs the owner); then the hardware gate of D-039 on a 5 V 4 A barrel supply.
+1. **Power:** a 5 V 4 A barrel supply with the J48 jumper is ordered, expected by **10 November 2026**. It fixes the `OC ALARM` entries and the clock drops, not the temperature. The final two-camera numbers (D-039) wait for it.
+2. **Two cameras:** reconnect test, switching the phone stream off and on.
+3. **GitHub:** revoke the SSH key `SHA256:liIG…6M0` ("Hamza-Jetson-Nano") and the `gh` OAuth token with `repo` and `admin:public_key`; deleting them from the device did not revoke them.
+4. **Confirm** the fine-grained token is Contents: Read-only, and upload the social preview PNG (Settings, Social preview).
+5. **RTSP from mobile data:** expect 403 (D-041); still untested.
 
 ## Still open
 
+- **D-042 calibration:** the limits for a "clear view" of an unknown face need tuning with the owner in front of the camera.
 - Self-hosted runner: the owner registers it (token never typed by an agent); restricted user and sudo rule need exact-command approval.
-- MLOps model manifest; LFW evaluation (download needs owner permission); license choice (InsightFace models are non-commercial).
-- Power: the Nano runs from a phone charger over micro-USB (owner, 2026-11-07); `soctherm: OC ALARM` every few seconds and CPU clocks drop to 1224 MHz. Advised 5 V 4 A barrel jack with J48; final two-camera numbers only after that.
+- MLOps model manifest; LFW evaluation (download needs owner permission); **licence choice — the InsightFace models are non-commercial, so a paid client install is not allowed as things stand.**
+- Client installs: a client device needs its own token, not a copy of the owner's, and an image that never carried the SDK-Manager key.

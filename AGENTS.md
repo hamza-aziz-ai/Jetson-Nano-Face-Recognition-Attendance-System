@@ -24,9 +24,9 @@ logs: logs/<year>/<Month>/{facepipe,web,enroll}.log, daily backups <module>.log.
 Key files:
 
 - `facepipe.cpp`: the whole pipeline, enrollment (`-DFACEPIPE_ENROLL` build), `--selftest`, `--version`.
-- `web.py` + `web/` (layout, CSS, JS): website with Overview, Live, Attendance, People, System (service control via an exact sudoers rule), login (PBKDF2 hash in `web_auth`), `--selftest` (starts a real server), `--set-password`, `--set-rtsp-password`; registration by invitation with staged gallery publication (`docs/features/registration.md`).
+- `web.py` + `web/` (layout, CSS, JS): website with Overview, Live, Attendance, People, System (service control via an exact sudoers rule), login (PBKDF2 hash in `web_auth`), `--selftest` (starts a real server), `--set-password`, `--set-rtsp-password`; registration by invitation with staged gallery publication (`docs/features/registration.md`). A deploy compiles it into `webapp.so` and leaves a two-line `web.py` that starts it (D-043), so a device carries no readable Python; every command above is unchanged.
 - `Makefile`, `VERSION`, `CHANGELOG.md`, `facepipe.env.example`.
-- `deploy/`: `install.sh` (portable install), `deploy.sh` (build, test, package, install, health check, rollback), unit templates `*.service.in`.
+- `deploy/`: `install.sh` (portable install), `deploy.sh` (build, compile the website, test, package, install, health check, rollback), `update.sh` (the pull timer, D-031), `compile-web.sh` (`web.py` to `webapp.so`, D-043), `maintenance/` (the Cloudflare Worker, D-037), unit templates `*.service.in`.
 - `ci/` and `.github/workflows/`: CI (scan, docs check, Python 3.6 self-test, compile against pinned JetPack headers, cppcheck, Mermaid), release on `v*.*.*` tags, deploy on the self-hosted runner.
 - `docs/`: Defend What You Ship set (ARCHITECTURE, FLOW, DECISIONS, ALTERNATIVES, THREAT, FAILURE, DATA, ASSUMPTIONS, TEST-CHECKLIST, ROLLBACK, HANDOVER, ...), `docs/bugs/`, `docs/features/`.
 
@@ -40,6 +40,7 @@ make                       # facepipe and facepipe-enroll
 ./facepipe --version
 sh deploy/deploy.sh vX.Y.Z <app_dir>   # release deploy with health check and automatic rollback
 sudo systemctl start facepipe-update    # automatic updates run this every 10 min (D-031)
+sh deploy/compile-web.sh   # what a deploy does to the website: web.py -> webapp.so (needs Nuitka)
 ```
 
 On the workstation (repo root):
@@ -53,9 +54,9 @@ sh ci/scan.sh              # run before every commit
 - **Defend What You Ship:** code and its docs change in the same commit. New decision: a `D-0NN` entry in `docs/DECISIONS.md`. New bug: a write-up in `docs/bugs/`. User-visible change: a line in `CHANGELOG.md` under `[Unreleased]`. Keep the "Checked against the code of vX.Y.Z" stamp in `docs/FLOW.md` current. The README validation table says only what was really tested on hardware.
 - **Branches and pull requests (D-032):** anything that changes behaviour or that CI, a release or a device consumes (code, workflows, deploy scripts, configs, Makefile, tests, hotfixes) goes through a branch `feat/`, `fix/`, `ci/` or `docs/<topic>` and a pull request; one concern each. Title: Conventional Commit, sentence-style, what and why (`fix(clips): ... so ...`). Body: `## What`, `## Proof` (real commands and output, what was not run), optional `## Docs`; end with the attribution lines. Enable auto-merge (`gh pr merge --auto --squash`); it merges on green CI. Docs and Markdown only: straight to main with `[skip ci]` in the title. Stage named files, never `git commit -a`. Prove locally first; no probe pushes.
 - **Releases:** never by hand. Raise `VERSION` and add the CHANGELOG section in the pull request; after it merges, the release workflow runs CI, tags `vX.Y.Z` and publishes; the device's update timer deploys it within 10 minutes (D-031).
-- **Never commit:** `web_auth`, `rtsp_auth`, `facepipe.env`, `data/`, `gallery/`, models, engines, images, videos, event logs. `ci/scan.sh` enforces this, plus no private IPs and no `/home/<user>/` paths.
+- **Never commit:** `web_auth`, `rtsp_auth`, `facepipe.env`, `gh_token`, `data/`, `gallery/`, models, engines, images, videos, event logs. `ci/scan.sh` enforces this, plus no private IPs and no `/home/<user>/` paths.
 - **Portable:** nothing in the repo may depend on one user's name, home folder, IP or camera. Use placeholders (`<app_dir>`, `CAMERA_IP`).
-- **Device safety:** never type or store passwords or tokens (the owner sets `web_auth`, `rtsp_auth` and runner tokens). Ask the owner before changing persistent system state (systemd units, sudoers, fstab, partitions, reboots). No Docker on the Nano. Mask IPs in anything shared.
+- **Device safety:** never type or store passwords or tokens (the owner sets `web_auth`, `rtsp_auth`, `gh_token` and runner tokens). A device needs Nuitka for a deploy to succeed (`pip3 install --user nuitka==4.3.4`, D-043). Ask the owner before changing persistent system state (systemd units, sudoers, fstab, partitions, reboots). No Docker on the Nano. Mask IPs in anything shared.
 - **Simplest correct design:** no speculative features; reuse what is in the file before adding code; leave one runnable check (`--selftest`) for non-trivial logic.
 - **Second opinion:** decisions with real trade-offs (design, security, data loss, hard to reverse) go to a council with Codex in the owner's fixed Codex session; record "with Codex (council)" in the decision. Ownership calls (exposure, retention, money, legal) go to the owner.
 - **Editing:** files use LF (`.gitattributes`). Chain edit, scan and commit on one line with `&&`, check `git log -1 --stat` before reporting, and read CI for the exact commit SHA.
@@ -70,3 +71,5 @@ sh ci/scan.sh              # run before every commit
 - `cp` over a running binary fails with "Text file busy": copy beside it and rename.
 - nvinfer `interval` is changeable only in NULL or READY state (why detection is our own probe, D-028).
 - Do not call the log macros from inside `log_line` (recursion); library prints go only to the journal.
+- Nuitka's module must not be named `web`: the `web/` directory beside it wins the import, so `compile-web.sh` builds `webapp.so`.
+- A build directory from `mktemp -d` needs a `trap`, or a deploy leaves the whole source on the device (`docs/bugs/deploy-left-source-in-tmp.md`).

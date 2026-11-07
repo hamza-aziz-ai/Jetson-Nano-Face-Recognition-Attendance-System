@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.12.0 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.13.7 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -110,6 +110,9 @@ sequenceDiagram
   end
   B->>W: GET /api/status every 10 s
   W-->>B: live, waiting for the camera, or stopped
+  opt the state is not the one this page was drawn with
+    B->>B: load the page again
+  end
 ```
 
 Key: `Handler.do_GET`, `Handler.user`, `Server.session_principal`, `allowed`, `Handler.forbidden`, `page`, `attendance`, `Handler.live`, `status` (`web.py`); `on_jpeg` (`facepipe.cpp`).
@@ -124,6 +127,7 @@ Key: `Handler.do_GET`, `Handler.user`, `Server.session_principal`, `allowed`, `H
 8. Each new frame goes to the browser as one part of the multipart response.
 9. The status badge polls every 10 s.
 10. Status comes from `status.json`: older than 20 s means stopped, below 0.5 fps means waiting for the camera.
+11. The poll writes only the badge. The banner on every page, the dot in the sidebar and the System page's figures and buttons are rendered by the server, so each page carries the state it was drawn with in `data-state`; when the polled state differs, the page loads itself again (v1.13.7). It waits while an input has focus, so a half-filled form is not discarded.
 
 ## 4. Enrollment
 

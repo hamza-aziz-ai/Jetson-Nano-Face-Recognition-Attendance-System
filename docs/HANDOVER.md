@@ -2,6 +2,27 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## Releases v1.12.3 to v1.13.7: 2026-11-07 (model: Claude Opus 5.5)
+
+The day the system was prepared to be installed somewhere other than the owner's desk, after the owner asked: "What if I need to deploy this at a client machine. Currently it uses bare Python files, right?"
+
+Done:
+
+- **The website ships compiled** (D-043). `deploy/compile-web.sh` runs Nuitka on every deploy, before the self-tests, so the tests exercise what ships: `web.py` becomes `webapp.so` and a two-line starter. The commands, the systemd unit and CI are unchanged because the stub keeps the name. Nuitka 4.3.4 supports Python 3.4-3.14, so the Nano's 3.6.9 is in range; the compile takes 5 m 40 s idle and about 7 m 30 s while recognition runs.
+- **A private repository is read with a token** (D-044) from `<app_dir>/gh_token`, passed through the environment, never in a command line or a URL. Without it the scripts behave as before and say what is missing.
+- **Three bugs found by doing the above**, each written up: a static file that no release ever shipped, where the server dropped the connection instead of answering 404 (`bugs/favicon-missing-500.md`); a deploy that left the whole source in `/tmp`, five copies, because `mktemp -d` had no `trap` (`bugs/deploy-left-source-in-tmp.md`); and the health warning, which compared every sensor with the CPU's limits and so warned about AO at 85 °C, then warned at 80 °C, which is where this board sits while simply running.
+- **Pages follow the service.** Starting recognition left every page showing "Recognition is NOT RUNNING" until a manual refresh, because only the corner pill was updated by the status poll. Each page now carries the state it was drawn with and reloads when the real state differs.
+- **The device was emptied of what a client should not have**: `facepipe.cpp`, the `Makefile`, a `.pyc` of the website, source copies under `.prev`, the owner's SSH key, the `gh` login with `repo` and `admin:public_key` scopes, and the `NVIDIA-SDK-Manager` key that flashing leaves in `authorized_keys` (removed from the Orin too).
+
+Lessons worth keeping:
+
+- Compiling one file protects nothing if the build drops the rest beside it. "No readable source" is a property of the whole device: check `/tmp`, `__pycache__` and rollback copies before saying a box is clean.
+- Testing the package instead of the checkout is what found the missing favicon; the self-test had been green for three versions because it ran inside the source tree, where the file exists.
+- A warning that fires during normal operation is one nobody reads. Both health thresholds were wrong in that direction.
+- Editing `authorized_keys` is the one change that can lock everyone out, and each command opens a new connection: check which key actually authenticates in `/var/log/auth.log`, filter by fingerprint, assert the live key survives before writing, then test a fresh connection.
+
+Next: the 5 V 4 A barrel supply (expected 10 November) and then the two-camera numbers; D-042 calibration with the owner in front of the camera; the licence decision, since the InsightFace models are non-commercial and a paid client install is not allowed as things stand.
+
 ## Release v1.0.0: 2026-11-06 (model: Claude Opus 5.5)
 
 Done: every README validation item verified on the Nano (RTSP, USB, CSI cameras; clips and evidence; RTSP in VLC). v1.0.0 released.
