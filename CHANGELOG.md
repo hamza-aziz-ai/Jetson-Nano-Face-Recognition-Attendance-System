@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-11-07
+
+### Changed
+
+- The health warning on the System page now says which reading is wrong and what to do about it, instead of "The device is warm or short of memory; keep an eye on it". It names the hottest sensor and its temperature, or the memory free of the total, or both when both apply, and the hot message points at the fan and airflow while the memory one points at restarting the services. On a device running only this software low memory is the rare case of the two, and the old wording sent the reader looking in the wrong place.
+
 ## [1.13.1] - 2026-11-07
 
 ### Fixed
