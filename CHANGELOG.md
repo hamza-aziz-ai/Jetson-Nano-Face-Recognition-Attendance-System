@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- The email and phone fields on the Users page had the browser's plain look; they now match the other fields (owner).
+
 ## [1.11.0] - 2026-11-07
 
 ### Added
