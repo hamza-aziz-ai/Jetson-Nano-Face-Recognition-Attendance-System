@@ -17,7 +17,11 @@ DIST=${DIST:-$WORK/dist}
 FILES="facepipe facepipe-enroll web.py webapp.so VERSION facepipe.env.example deploy/update.sh web/layout.html web/public.html web/app.css web/app.js web/logo.svg web/favicon.svg"
 
 echo "== build $TAG"
-git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
+# the repository is private (D-044): same read-only token as update.sh, kept out of argv and out of the clone's config
+GH_TOKEN=$(cat "$APP/gh_token" 2>/dev/null || true)
+export GH_TOKEN
+git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' \
+  clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
 cd "$WORK/src"
 [ "$(cat VERSION)" = "$VER" ] || { echo "VERSION $(cat VERSION) does not match $TAG"; exit 1; }
 make all >/dev/null

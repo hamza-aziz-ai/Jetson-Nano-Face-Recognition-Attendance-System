@@ -30,5 +30,6 @@ No dependency is downloaded during a build or at run time: everything comes with
 | Dashboard login | `web_auth` (PBKDF2 hash, mode 0600) | Owner: `python3 web.py --set-password <user>` |
 | RTSP login | `rtsp_auth` (plain, mode 0600) | Owner: `python3 web.py --set-rtsp-password <user>` |
 | Camera address | `facepipe.env` | Owner; the repository has `facepipe.env.example` with a placeholder |
+| GitHub read-only token | `gh_token` (mode 0600) | Owner: the repository is private, and automatic updates read the release list and clone the tag with it (D-044). Fine-grained, this repository only, Contents: read |
 
 Every push is scanned for IP addresses and these file names before it leaves the machine.

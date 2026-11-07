@@ -15,6 +15,7 @@ echo "== checks"
 [ -d "$DS" ] || { echo "DeepStream 6.0 not found in $DS (install it: sudo apt install deepstream-6.0)"; exit 1; }
 [ -x "$TRTEXEC" ] || { echo "trtexec not found at $TRTEXEC (part of JetPack TensorRT)"; exit 1; }
 id -nG "$USER_NAME" | grep -qw video || echo "warning: $USER_NAME is not in the video group (GPU and cameras need it): sudo usermod -aG video $USER_NAME"
+[ -f gh_token ] || echo "warning: no gh_token here; the repository is private, so automatic updates need a read-only token (D-044, docs/RELEASING.md)"
 # every release compiles web.py into webapp.so on the device it deploys to (D-043); without Nuitka every update fails
 python3 -m nuitka --version >/dev/null 2>&1 || { echo "Nuitka not found (automatic updates need it): pip3 install --user nuitka==4.3.4"; exit 1; }
 

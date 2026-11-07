@@ -6,7 +6,7 @@ fail=0
 files=$(git ls-files)
 
 # 1. files that must never be committed
-bad=$(printf '%s\n' "$files" | grep -E '(^|/)(web_auth|rtsp_auth|facepipe\.env)$|^(data|gallery)/|\.(onnx|plan|engine|jpg|jpeg|png|bmp|mp4|tsv|jsonl)$' || true)
+bad=$(printf '%s\n' "$files" | grep -E '(^|/)(web_auth|rtsp_auth|facepipe\.env|gh_token)$|^(data|gallery)/|\.(onnx|plan|engine|jpg|jpeg|png|bmp|mp4|tsv|jsonl)$' || true)
 if [ -n "$bad" ]; then echo "FORBIDDEN FILES:"; echo "$bad"; fail=1; fi
 
 # 2. private IPv4 addresses (127.0.0.1 is allowed: the local RTP hop)
