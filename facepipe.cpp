@@ -373,11 +373,92 @@ static std::vector<float> embed(Engine &rec, const cv::Mat &face) {
   return e;
 }
 
-static cv::Mat align(const cv::Mat &img, const float *kps) {
+static cv::Mat align(const cv::Mat &img, const float *kps, const cv::Mat &M = cv::Mat()) {
   cv::Mat out;
-  cv::warpAffine(img, out, umeyama(kps), cv::Size(112, 112), cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0));
+  cv::warpAffine(img, out, M.empty() ? umeyama(kps) : M, cv::Size(112, 112), cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0));
   return out;
 }
+
+// ---- unknown-face quality (D-042): an unknown face is logged only from a clear try; known recognition is unchanged ----
+// Heuristics on the five SCRFD points in mux-surface pixels (calibrated limits, not measured angles):
+//   eye   effective eye distance: the smaller of the mux distance and the distance in decoded-camera pixels, so neither
+//         upscaling nor downscaling lets a small face pass; unknown camera size = not met
+//   yaw   nose offset from the eye midpoint along the eye line / eye distance (roll removed)
+//   pitch nose position between the eye midpoint and the mouth midpoint, across the eye line (template 0.49)
+//   fit   mean distance of the aligned points from the ArcFace template (112 px): a consistency check only
+//   cut   the facial region, mapped back through the alignment, must lie inside the real picture (never judged from
+//         black pixels: dark skin and shadows are black too); the face box must not touch its edge
+//   bright mean luma of the central facial region of the aligned crop
+// Limits: FACEPIPE_UNKNOWN_EYE_MIN, _YAW_MAX, _PITCH_MIN, _PITCH_MAX, _FIT_MAX, _BRIGHT_MIN (checked in main).
+static float Q_EYE_MIN = 28, Q_YAW_MAX = 0.25f, Q_PITCH_MIN = 0.35f, Q_PITCH_MAX = 0.65f, Q_FIT_MAX = 6, Q_BRIGHT_MIN = 50;
+static const float TEMPLATE_PITCH = 0.495f;  // ARC_DST: (71.74 - 51.60) / (92.28 - 51.60)
+struct Quality { float eye = 0, yaw = 0, pitch = 0, fit = 0, bright = 0; bool ok = false; const char *why = "none"; };
+
+// kps: left eye, right eye, nose, left and right mouth corner; M: the alignment of kps (umeyama); face: the aligned
+// 112x112 RGB crop; mw x mh: the mux frame; sw x sh: the decoded camera size (0 = unknown); padded: the mux kept the
+// aspect ratio with black bands (two cameras); box: left, top, width, height
+static Quality face_quality(const float *kps, const cv::Mat &M, const cv::Mat &face, int mw, int mh, int sw, int sh,
+                            bool padded, const float *box) {
+  Quality q;
+  for (int i = 0; i < 10; i++)
+    if (!std::isfinite(kps[i])) { q.why = "landmarks"; return q; }
+  float ex = kps[2] - kps[0], ey = kps[3] - kps[1], eye_mux = std::hypot(ex, ey);
+  if (eye_mux < 1 || M.empty()) { q.why = "landmarks"; return q; }
+  float sx = sw > 0 ? (float)mw / sw : 0, sy = sh > 0 ? (float)mh / sh : 0;
+  if (padded) sx = sy = std::min(sx, sy);
+  q.eye = sx > 0 && sy > 0 ? std::min(eye_mux, std::hypot(ex / sx, ey / sy)) : 0;
+  float ux = ex / eye_mux, uy = ey / eye_mux, vx = -uy, vy = ux;  // along and across the eye line
+  float mx = (kps[0] + kps[2]) / 2, my = (kps[1] + kps[3]) / 2;
+  float nx = kps[4] - mx, ny = kps[5] - my, ox = (kps[6] + kps[8]) / 2 - mx, oy = (kps[7] + kps[9]) / 2 - my;
+  q.yaw = (nx * ux + ny * uy) / eye_mux;
+  float dm = ox * vx + oy * vy;
+  q.pitch = dm > 1 ? (nx * vx + ny * vy) / dm : -1;
+  for (int i = 0; i < 5; i++) {
+    double x = M.at<double>(0, 0) * kps[2 * i] + M.at<double>(0, 1) * kps[2 * i + 1] + M.at<double>(0, 2);
+    double y = M.at<double>(1, 0) * kps[2 * i] + M.at<double>(1, 1) * kps[2 * i + 1] + M.at<double>(1, 2);
+    q.fit += (float)std::hypot(x - ARC_DST[i][0], y - ARC_DST[i][1]) / 5;
+  }
+  // the real picture inside the mux frame; with padding its position is not assumed: the area valid both when the
+  // bands are right/bottom and when they are centred (ponytail: exact once the band position is measured)
+  float vw = padded && sx > 0 ? sw * sx : mw, vh = padded && sy > 0 ? sh * sy : mh;
+  float x0 = (mw - vw) / 2, y0 = (mh - vh) / 2, x1 = vw, y1 = vh, margin = 2;
+  cv::Mat inv;
+  cv::invertAffineTransform(M, inv);
+  bool cut = box[0] < x0 + margin || box[1] < y0 + margin || box[0] + box[2] > x1 - margin || box[1] + box[3] > y1 - margin;
+  for (float cx : {30.f, 82.f})
+    for (float cy : {40.f, 100.f}) {  // the facial region of the 112 px template
+      double x = inv.at<double>(0, 0) * cx + inv.at<double>(0, 1) * cy + inv.at<double>(0, 2);
+      double y = inv.at<double>(1, 0) * cx + inv.at<double>(1, 1) * cy + inv.at<double>(1, 2);
+      if (x < x0 + margin || y < y0 + margin || x > x1 - margin || y > y1 - margin) cut = true;
+    }
+  double sum = 0;
+  for (int y = 44; y < 96; y++)
+    for (int x = 36; x < 76; x++) {
+      const cv::Vec3b &p = face.at<cv::Vec3b>(y, x);
+      sum += 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+    }
+  q.bright = (float)(sum / (52 * 40));
+  q.why = q.eye < Q_EYE_MIN ? "small" : cut ? "cut" : std::fabs(q.yaw) > Q_YAW_MAX ? "yaw"
+        : q.pitch < Q_PITCH_MIN || q.pitch > Q_PITCH_MAX ? "pitch" : q.fit > Q_FIT_MAX ? "fit" : q.bright < Q_BRIGHT_MIN ? "dark" : "";
+  q.ok = !*q.why;
+  if (q.ok) q.why = "clear";
+  return q;
+}
+
+// the clearer of two clear tries: more frontal, then larger
+static bool clearer(const Quality &a, const Quality &b) {
+  float fa = std::fabs(a.yaw) + std::fabs(a.pitch - TEMPLATE_PITCH), fb = std::fabs(b.yaw) + std::fabs(b.pitch - TEMPLATE_PITCH);
+  if (std::fabs(fa - fb) > 0.02f) return fa < fb;
+  return a.eye > b.eye;
+}
+
+static std::string q_json(const Quality &q) {
+  char b[160];
+  snprintf(b, sizeof b, "{\"eye\":%.1f,\"yaw\":%.3f,\"pitch\":%.3f,\"fit\":%.2f,\"bright\":%.0f,\"result\":\"%s\"}", q.eye, q.yaw,
+           q.pitch, q.fit, q.bright, q.why);
+  return b;
+}
+
 
 // ---- gallery: TSV "name<TAB>v1,v2,...,v512", one line per enrolled photo; reloaded when the file changes ----
 struct Gallery {
@@ -710,7 +791,7 @@ static void write_bmp(const std::string &path, const cv::Mat &rgb) {
 
 struct Cam;
 static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
-                      const std::string &frame, const std::string &clip_rel);
+                      const std::string &frame, const std::string &clip_rel, const Quality &q);
 
 // ---- cameras (D-039): up to 2 network cameras in one pipeline (one mux, shared engines); USB, CSI or a file stay one.
 // data/cameras.active: one line per camera, "<uri> <width> <height> [<id> [<name>]]" (written by the website; the id is the
@@ -756,7 +837,7 @@ __attribute__((unused)) static int read_cameras(const std::string &path) {  // u
 }
 
 static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
-                      const std::string &frame, const std::string &clip_rel) {
+                      const std::string &frame, const std::string &clip_rel, const Quality &q) {
   auto now = std::chrono::system_clock::now();
   std::string day_s, hms_s, iso_s;
   stamp(day_s, hms_s, &iso_s);
@@ -770,10 +851,11 @@ static void log_event(const Cam &cam, guint64 track, const std::string &name, fl
   if (!f) { LOGE("cannot write events in %s", DATA_DIR.c_str()); return; }
   // score is always the best cosine; metric and l2 record which rule decided and the matching L2 distance
   fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
-             "\"snap\":%s,\"frame\":%s,\"clip\":%s,\"camera\":%s,\"camera_name\":%s}\n",
+             "\"snap\":%s,\"frame\":%s,\"clip\":%s,\"camera\":%s,\"camera_name\":%s,\"q\":%s}\n",
           iso, std::chrono::duration<double>(now.time_since_epoch()).count(), (unsigned long long)track,
           json_str(name).c_str(), score, METRIC_L2 ? "l2" : "cosine", l2_of(score), det, json_str(snap).c_str(),
-          json_str(frame).c_str(), json_str(clip_rel).c_str(), json_str(cam.id).c_str(), json_str(cam.name).c_str());
+          json_str(frame).c_str(), json_str(clip_rel).c_str(), json_str(cam.id).c_str(), json_str(cam.name).c_str(),
+          q_json(q).c_str());
   fclose(f);
 }
 
@@ -814,11 +896,13 @@ static void seed_repeats() {
 }
 
 // ---- per-track state, shared by the tracker probe (producer) and the worker ----
-struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false; std::string name; float score = 0; };
+// unclear: decided Unknown without a clear try (nothing logged, D-042); extra: its one more try for a later clear sample
+struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false, unclear = false, extra = false;
+                    std::string name; float score = 0; };
 static std::mutex st_mu;
 static std::map<TKey, TrackState> tracks;  // ponytail: cleared at 100k tracks; prune by last-seen if long runs need it
 
-struct Job { TKey key; gint frame; float box[5]; cv::Mat face; };  // face: 112x112 RGB u8; key.cam < 0: upload job key.gen
+struct Job { TKey key; gint frame; float box[5]; cv::Mat face; Quality q; };  // face: 112x112 RGB u8; key.cam < 0: upload job key.gen
 
 // ---- uploads (D-039): one video at a time in its own pipeline inside this process (engines shared, live first). Its jobs
 // share the worker but wait while live jobs are queued; they never touch attendance, evidence, clips or the repeat rule.
@@ -834,7 +918,7 @@ static std::deque<Job> q_jobs;
 static std::atomic<bool> q_stop{false};
 static FILE *json_out = stdout;  // real stdout; fd 1 is pointed at stderr so DeepStream's own prints don't mix in
 static const size_t Q_MAX = 32;  // drop jobs if the GPU falls behind instead of growing memory
-static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0}, n_repeats{0}, n_stale{0};
+static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0}, n_repeats{0}, n_stale{0}, n_unclear{0};
 
 // Watchdog thread, always running. (1) No frame for FACEPIPE_WATCHDOG seconds (default 60, 0 = off): exit 3 so systemd
 // restarts us. A thread, not a GLib timer: the CSI stall of 2026-11-06 happened before the main loop ran, and a stalled
@@ -865,7 +949,11 @@ static void start_watchdog() {
   }).detach();
 }
 
+// the best clear unknown try of a track so far, kept whole (D-042): what is logged and what the repeat rule compares
+struct Cand { cv::Mat face; std::vector<float> emb; float score; float box[5]; Quality q; double at; };
+
 static void rec_worker() {
+  std::map<TKey, Cand> cands;  // worker thread only; at most 64, dropped at a decision or a gallery change
   Engine rec;
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   Gallery gal;
@@ -884,10 +972,19 @@ static void rec_worker() {
     if (gal.reload_if_changed()) {  // people added, updated or removed: names cached on live tracks may be stale
       std::lock_guard<std::mutex> lk(st_mu);
       tracks.clear();
+      cands.clear();
     }
     auto t0 = std::chrono::steady_clock::now();
     auto e = embed(rec, j.face);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    bool finite = true;
+    for (float v : e) finite = finite && std::isfinite(v);
+    if (!finite) {  // a failed embedding says nothing about who it is: release the try (D-042)
+      std::lock_guard<std::mutex> lk(st_mu);
+      auto it = tracks.find(j.key);
+      if (j.key.cam >= 0 && it != tracks.end() && it->second.pending) { it->second.pending = false; it->second.tries--; }
+      continue;
+    }
     auto m = gal.match(e);
     bool known = m.first != "unknown";
     if (j.key.cam < 0) {  // upload: label the track of the current upload only; no events
@@ -912,32 +1009,56 @@ static void rec_worker() {
     const Cam &cam = cams[j.key.cam];
     bool decided = known || tries >= MAX_TRIES;
     double now = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-    bool rep = decided && repeat(cam.id, m.first, e, now);
+    if (!known && j.q.ok) {  // keep the clearest unknown try of this track
+      auto c = cands.find(j.key);
+      if (c == cands.end() || clearer(j.q, c->second.q)) {
+        Cand n{j.face, e, m.second, {j.box[0], j.box[1], j.box[2], j.box[3], j.box[4]}, j.q, now};
+        cands[j.key] = n;
+      }
+      if (cands.size() > 64) {  // bounded: the oldest goes
+        auto old = cands.begin();
+        for (auto it = cands.begin(); it != cands.end(); ++it) if (it->second.at < old->second.at) old = it;
+        cands.erase(old);
+      }
+    }
+    // the face to log: a known match's own try, or the clearest unknown try; none = unclear, nothing saved (D-042)
+    Cand pick{j.face, e, m.second, {j.box[0], j.box[1], j.box[2], j.box[3], j.box[4]}, j.q, now};
+    bool unclear = false;
+    if (decided && !known) {
+      auto c = cands.find(j.key);
+      if (c != cands.end()) pick = c->second;
+      else unclear = true;
+    }
+    if (decided) cands.erase(j.key);
+    bool rep = decided && !unclear && repeat(cam.id, m.first, pick.emb, now);
     EvReq req;
     req.key = j.key;
-    bool ev = decided && !rep && !stopping && rec_ok();
+    bool ev = decided && !unclear && !rep && !stopping && rec_ok();
     if (ev) { std::lock_guard<std::mutex> lk(j_mu); ev_reqs.push_back(&req); }  // before the label can show
     {
       std::lock_guard<std::mutex> lk(st_mu);
       auto it = tracks.find(j.key);
       if (it != tracks.end()) {
         it->second.pending = false;
-        if (decided) { it->second.done = true; it->second.name = m.first; it->second.score = m.second; }  // label shows from now
+        if (decided) {  // label shows from now
+          it->second.done = true; it->second.name = m.first; it->second.score = m.second; it->second.unclear = unclear;
+        }
       }
     }
-    if (rep) n_repeats++;
+    if (unclear) n_unclear++;
+    else if (rep) n_repeats++;
     else if (decided) {
       std::string c = clip_trigger();       // clip starts CLIP_PRE before now
       std::string fr = ev ? save_evidence(j.key.id, req) : "";  // a frame that shows the decided name
-      log_event(cam, j.key.id, m.first, m.second, j.box[4], j.face, fr, c);
+      log_event(cam, j.key.id, m.first, pick.score, pick.box[4], pick.face, fr, c, pick.q);
       (known ? n_known : n_unknown)++;
     }
     std::string s;
     char tmp[64];
     for (int i = 0; i < 512; i++) { snprintf(tmp, sizeof tmp, i ? ",%.5f" : "%.5f", e[i]); s += tmp; }
-    fprintf(json_out, "{\"frame\":%d,\"track\":%llu,\"try\":%d,\"name\":%s,\"score\":%.3f,\"bbox\":[%.0f,%.0f,%.0f,%.0f],\"det\":%.3f,\"rec_ms\":%.1f,\"emb\":[%s]}\n",
+    fprintf(json_out, "{\"frame\":%d,\"track\":%llu,\"try\":%d,\"name\":%s,\"score\":%.3f,\"bbox\":[%.0f,%.0f,%.0f,%.0f],\"det\":%.3f,\"rec_ms\":%.1f,\"q\":%s,\"emb\":[%s]}\n",
             j.frame, (unsigned long long)j.key.id, tries, json_str(m.first).c_str(), m.second, j.box[0], j.box[1], j.box[2],
-            j.box[3], j.box[4], ms, s.c_str());
+            j.box[3], j.box[4], ms, q_json(j.q).c_str(), s.c_str());
     fflush(json_out);
   }
 }
@@ -1129,6 +1250,27 @@ static bool want_attempt(const TKey &k, int frame) {
   return true;
 }
 
+// an Unknown decided without a clear try may get one more try, if a later sample is clear (D-042); checked at most every
+// RETRY_GAP frames, then the caller measures the sample and calls take_extra
+static bool extra_possible(const TKey &k, int frame) {
+  std::lock_guard<std::mutex> lk(st_mu);
+  auto it = tracks.find(k);
+  if (it == tracks.end() || !it->second.unclear || it->second.extra || frame - it->second.last_frame < RETRY_GAP) return false;
+  it->second.last_frame = frame;
+  return true;
+}
+static void take_extra(const TKey &k) {
+  std::lock_guard<std::mutex> lk(st_mu);
+  auto &s = tracks[k];
+  s.extra = true; s.unclear = false; s.done = false; s.pending = true; s.tries++;
+}
+// a try that never reached recognition (mapping failed, queue full) does not use up the track's tries
+static void release_try(const TKey &k) {
+  std::lock_guard<std::mutex> lk(st_mu);
+  auto it = tracks.find(k);
+  if (it != tracks.end() && it->second.pending) { it->second.pending = false; it->second.tries--; }
+}
+
 // on-screen box + label for nvdsosd: green name, red Unknown, amber while recognizing; true if the decided label is on
 static void draw_label(NvDsObjectMeta *o, const TrackState *s);
 static bool label(NvDsObjectMeta *o, const TKey &k) {
@@ -1201,23 +1343,32 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
       if (label(o, k)) shown.push_back(k);
       float kps[10];
       if (o->object_id == UNTRACKED_OBJECT_ID || o->rect_params.width < MIN_FACE_PX || !unpack_kps(o, kps)) continue;
-      if (!want_attempt(k, fm->frame_num)) continue;
+      bool normal = want_attempt(k, fm->frame_num);
+      if (!normal && !extra_possible(k, fm->frame_num)) continue;
       if (!surf) {
-        if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) return GST_PAD_PROBE_OK;
+        if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) { if (normal) release_try(k); return GST_PAD_PROBE_OK; }
         surf = (NvBufSurface *)mi.data;
       }
       int b = fm->batch_id;
       if (!mapped) {
-        if (NvBufSurfaceMap(surf, b, 0, NVBUF_MAP_READ) != 0) break;
+        if (NvBufSurfaceMap(surf, b, 0, NVBUF_MAP_READ) != 0) { if (normal) release_try(k); break; }
         NvBufSurfaceSyncForCpu(surf, b, 0);
         mapped = true;
       }
       auto &p = surf->surfaceList[b];
       cv::Mat rgba(p.height, p.width, CV_8UC4, p.mappedAddr.addr[0], p.pitch), face;
-      cv::cvtColor(align(rgba, kps), face, cv::COLOR_RGBA2RGB);
+      cv::Mat M = umeyama(kps);
+      cv::cvtColor(align(rgba, kps, M), face, cv::COLOR_RGBA2RGB);
+      float bx[4] = {o->rect_params.left, o->rect_params.top, o->rect_params.width, o->rect_params.height};
+      Quality q = face_quality(kps, M, face, (int)p.width, (int)p.height, (int)fm->source_frame_width,
+                               (int)fm->source_frame_height, n_cams > 1, bx);
+      if (!normal) {  // the unclear track's later sample: one more try only if this one is clear
+        if (!q.ok) continue;
+        take_extra(k);
+      }
       Job j{k, fm->frame_num,
             {o->rect_params.left, o->rect_params.top, o->rect_params.left + o->rect_params.width,
-             o->rect_params.top + o->rect_params.height, o->confidence}, face};
+             o->rect_params.top + o->rect_params.height, o->confidence}, face, q};
       bool queued = false;
       {
         std::lock_guard<std::mutex> lk(q_mu);
@@ -1226,8 +1377,7 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
       if (queued) q_cv.notify_one();
       else {
         n_dropped++;
-        std::lock_guard<std::mutex> lk(st_mu);
-        tracks[k].pending = false;  // let the track try again later
+        release_try(k);  // let the track try again later, without using up a try
       }
     }
     if (mapped) { NvBufSurfaceUnMap(surf, fm->batch_id, 0); mapped = false; }
@@ -1571,8 +1721,9 @@ static gboolean report(gpointer) {
   last_det = n_detects;
   static int calls = 0;
   if (calls++ % 12 == 0)  // one log line a minute; status.json every 5 s
-    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld repeats %ld stale %ld", fps, dps,
-         f, (long)n_faces, (long)n_known, (long)n_unknown, (long)n_dropped, (long)n_repeats, (long)n_stale);
+    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld unclear %ld dropped %ld repeats %ld stale %ld",
+         fps, dps, f, (long)n_faces, (long)n_known, (long)n_unknown, (long)n_unclear, (long)n_dropped, (long)n_repeats,
+         (long)n_stale);
   last = f; t = now;
   static long last_cf[MAX_CAMS] = {0};
   std::string cj;
@@ -1883,6 +2034,38 @@ static int selftest() {
     assert(!repeat("d", "a", u, 2100) && repeat("d", "a", u, 2101));  // per camera (D-039): "a" was at camera c only
     logged.clear();
   }
+  {  // unknown-face quality (D-042): the template face is clear; explicit failing cases
+    float t[10], k[10], box[4] = {500, 300, 200, 220};
+    for (int i = 0; i < 5; i++) { t[2 * i] = 560 + ARC_DST[i][0] * 2; t[2 * i + 1] = 330 + ARC_DST[i][1] * 2; }  // eyes 70 px apart
+    cv::Mat face(112, 112, CV_8UC3, cv::Scalar(128, 128, 128)), dark(112, 112, CV_8UC3, cv::Scalar(20, 20, 20));
+    auto Q = [&](const float *p, const cv::Mat &f, int sw, int sh, bool pad, const float *b) {
+      return face_quality(p, umeyama(p), f, 1280, 720, sw, sh, pad, b);
+    };
+    Quality q = Q(t, face, 1280, 720, false, box);
+    assert(q.ok && q.fit < 0.01f && std::fabs(q.yaw) < 0.01f && std::fabs(q.pitch - TEMPLATE_PITCH) < 0.01f && q.eye > 70);
+    memcpy(k, t, sizeof k); k[4] += 24;  // nose 24 px sideways (12 px in template units): fails on yaw, not on the residual
+    q = Q(k, face, 1280, 720, false, box);
+    assert(!q.ok && !strcmp(q.why, "yaw") && q.fit < Q_FIT_MAX);
+    for (int i = 0; i < 10; i += 2) { k[i] = 1280 - t[i]; k[i + 1] = 720 - t[i + 1]; }  // rotated 180 degrees: still clear
+    float rbox[4] = {1280 - box[0] - box[2], 720 - box[1] - box[3], box[2], box[3]};
+    assert(Q(k, face, 1280, 720, false, rbox).ok);
+    assert(!strcmp(Q(t, dark, 1280, 720, false, box).why, "dark"));
+    assert(!strcmp(Q(t, face, 0, 0, false, box).why, "small"));          // unknown camera size: not met
+    assert(!strcmp(Q(t, face, 320, 180, false, box).why, "small"));      // upscaled 4x: 17.6 px real
+    float ok_box[4] = {500, 300, 200, 220};
+    assert(Q(t, face, 2560, 1440, false, ok_box).ok);                    // downscaled: the smaller (mux) distance counts
+    for (int i = 0; i < 10; i++) k[i] = t[i] * 0.5f;                     // eyes 35 px in the mux
+    float sbox[4] = {250, 150, 100, 110};
+    assert(Q(k, face, 1280, 720, false, sbox).ok && !strcmp(Q(k, face, 640, 360, false, sbox).why, "small"));  // 17.6 px real
+    for (int i = 0; i < 10; i += 2) { k[i] = t[i] - 600; k[i + 1] = t[i + 1]; }  // half outside the picture: cut
+    float cbox[4] = {-100, 300, 200, 220};
+    assert(!strcmp(Q(k, face, 1280, 720, false, cbox).why, "cut"));
+    k[0] = NAN;
+    assert(!strcmp(Q(k, face, 1280, 720, false, box).why, "landmarks"));
+    Quality a, b;
+    a.yaw = 0.02f; a.pitch = 0.5f; a.eye = 40; b.yaw = 0.2f; b.pitch = 0.5f; b.eye = 90;
+    assert(clearer(a, b) && !clearer(b, a));  // more frontal beats larger
+  }
   {  // cameras.active lines (D-039): legacy "<uri> <w> <h>", and with id and a name that has spaces
     Cam a, b;
     bool ok_a = parse_cam_line("rtsp://h/x 1280 720", a), ok_b = parse_cam_line("rtsp://h/y 1920 1080 9f3a Main gate", b);
@@ -1987,6 +2170,21 @@ int main(int argc, char **argv) {
   LOG_ROOT = env("FACEPIPE_LOGS", app_dir + "/logs");
   IDLE_AFTER = std::atoi(env("FACEPIPE_IDLE_AFTER", "10").c_str());
   IDLE_STEP = std::max(1, std::atoi(env("FACEPIPE_IDLE_STEP", "6").c_str()));
+  {  // unknown-face quality limits (D-042): calibration settings, each within a sane range or the start fails
+    struct L { const char *name; float *v; float lo, hi; } ls[] = {
+        {"FACEPIPE_UNKNOWN_EYE_MIN", &Q_EYE_MIN, 8, 200}, {"FACEPIPE_UNKNOWN_YAW_MAX", &Q_YAW_MAX, 0.05f, 1},
+        {"FACEPIPE_UNKNOWN_PITCH_MIN", &Q_PITCH_MIN, 0, 1}, {"FACEPIPE_UNKNOWN_PITCH_MAX", &Q_PITCH_MAX, 0, 1.5f},
+        {"FACEPIPE_UNKNOWN_FIT_MAX", &Q_FIT_MAX, 0.5f, 30}, {"FACEPIPE_UNKNOWN_BRIGHT_MIN", &Q_BRIGHT_MIN, 0, 200}};
+    for (auto &l : ls) {
+      const char *s = getenv(l.name);
+      if (!s || !*s) continue;
+      char *end;
+      float v = strtof(s, &end);
+      if (*end || !(v >= l.lo && v <= l.hi)) { LOGE("%s must be a number from %g to %g, got '%s'", l.name, l.lo, l.hi, s); return 1; }
+      *l.v = v;
+    }
+    if (Q_PITCH_MIN >= Q_PITCH_MAX) { LOGE("FACEPIPE_UNKNOWN_PITCH_MIN must be below FACEPIPE_UNKNOWN_PITCH_MAX"); return 1; }
+  }
 #ifdef FACEPIPE_ENROLL
   LOG_MODULE = "enroll";
 #endif

@@ -428,3 +428,15 @@ Chosen: the RTSP server refuses (403) every request from an address that is not 
 Why: owner's decision on exposure. Binding to the local interface alone would not stop a router port forward (it delivers to the local address); checking the sender's address does.
 Trade-off: a viewer on a VPN into the home network counts as local; the RTSP login still travels in plain text on the local network.
 Revisit if: an NVR outside the home must record the stream.
+
+## D-042: Log unknown faces only from a clear view (owner; council)
+Owner's choice, 2026-11-07, after a morning of 25 unknown events that were mostly the owner himself at bad angles (profile, from below, upside down, dark, cut off): "Only clear faces".
+Chosen, agreed with Codex in a council (3 exchanges). Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council). Known recognition is unchanged; the gate applies only to logging unknown faces.
+
+- Clear = all of: yaw (nose offset along the eye line / eye distance) and pitch (nose position between eyes and mouth across the eye line) within limits, with the alignment residual only as a consistency check (the residual alone was rejected: a 12 px sideways nose shift left 3.8 px); effective eye distance = the smaller of the mux and the decoded-camera distance, at least 28 px (unknown camera size = not met, so upscaling never helps); the facial region, mapped back through the alignment, inside the real picture and the face box away from its edge (never judged from black pixels); mean brightness of the central facial region.
+- Per track the clearest try (most frontal, then largest) is kept whole (crop, embedding, scores, quality); it is logged and compared by the repeat rule. No clear try in 5: Unknown on screen, nothing saved, counted `unclear`; a later clear sample gets one more try. Tries that never reached recognition do not count. At most 64 kept tries.
+- Limits start as guesses (eye 28, yaw 0.25, pitch 0.35-0.65, fit 6, brightness 50), set with `FACEPIPE_UNKNOWN_EYE_MIN`, `_YAW_MAX`, `_PITCH_MIN`, `_PITCH_MAX`, `_FIT_MAX`, `_BRIGHT_MIN`; every try's numbers go to stdout and each event's `q`, for calibration on the owner's own frontal, profile, up, down, dark and cut-off samples.
+
+Rejected: never logging unknowns (the CCTV system's way; the owner wants strangers recorded); the residual alone as the pose test; detecting cut-off faces from black pixels; choosing the logged try by gallery similarity instead of clarity.
+Trade-off: a stranger who never faces the camera is not recorded; limits are unvalidated until calibrated; "unknown" means no gallery match, not a proven stranger.
+Revisit if: calibration shows the limits drop clear strangers or pass bad views.

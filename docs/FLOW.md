@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.10.0 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.12.0 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -52,7 +52,9 @@ flowchart TD
   TR -->|"`no`"| RT["`(8) Track retried later`"]:::outcome
   TR -->|"`yes`"| UN["`(9) Unknown: track done`"]:::outcome
   KN --> RP{"`(10) Same person logged at this camera in the last 5 min?`"}:::decision
-  UN --> RP
+  UN --> QC{"`Clearest unknown try clear? (D-042)`"}:::decision
+  QC -->|"`no`"| UC["`Unclear: Unknown on screen, nothing saved`"]:::outcome
+  QC -->|"`yes`"| RP
   RP -->|"`yes`"| SK["`Repeat: nothing logged, label still shown`"]:::outcome
   RP -->|"`no`"| C["`(11) Start or extend event clip`"]:::step
   C --> EV["`(12) Save a frame certified to show the name`"]:::step --> LOG[("`(13) events-YYYY-MM-DD.jsonl and face snapshot`")]:::store
@@ -75,7 +77,7 @@ Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `pas
 6. A match marks the track done with the person's name; the label turns green.
 7. Below the threshold the try count decides.
 8. Fewer than 5 tries: the track gets another attempt (FLOW 1, step 7).
-9. On the 5th try the track is done as Unknown; the label turns red.
+9. On the 5th try the track is done as Unknown; the label turns red. Only the clearest clear try of the track is logged (`face_quality`, `clearer`, D-042: frontal, eyes at least 28 px in camera pixels, not cut off, not dark); with none it is `unclear` and nothing is saved, and a later clear sample gets one more try (`extra_possible`, `take_extra`). Tries that fail before recognition are given back (`release_try`).
 10. `repeat` applies the CCTV system's 5-minute rule (D-038), per camera (D-039): a name logged at this camera in the last 5 minutes, or an unknown face that would match an unknown logged in the last 5 minutes, writes nothing (no clip, frame, snapshot or event; counted as `repeats` in the fps log line). `seed_repeats` loads today's named events at start, so a restart does not log the same people again.
 11. `clip_trigger` starts an MP4 clip from the ring buffer (3 s back) or extends the current one by 5 s.
 12. Before the label can show, the worker registers an evidence request. `tracker_probe` lists every batch in which that camera had a fresh frame and the track carried the decided label (`certify_batch`); `on_jpeg` keeps the JPEG of exactly such a batch (`offer_jpeg`), and `save_evidence` writes it within 1.5 s or saves none. A later batch is not enough: the track may have left, and the tiler repeats a stalled camera's last picture without its labels.
