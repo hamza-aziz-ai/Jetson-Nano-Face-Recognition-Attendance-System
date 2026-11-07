@@ -1847,9 +1847,11 @@ static int selftest() {
   }
   {  // cameras.active lines (D-039): legacy "<uri> <w> <h>", and with id and a name that has spaces
     Cam a, b;
-    assert(parse_cam_line("rtsp://h/x 1280 720", a) && a.w == 1280 && a.id == "cam0" && a.name == "Camera");
-    assert(parse_cam_line("rtsp://h/y 1920 1080 9f3a Main gate", b) && b.id == "9f3a" && b.name == "Main gate" && b.h == 1080);
-    assert(!parse_cam_line("rtsp://h/x", a) && !parse_cam_line("", a) && !parse_cam_line("rtsp://h/x 0 720", a));
+    bool ok_a = parse_cam_line("rtsp://h/x 1280 720", a), ok_b = parse_cam_line("rtsp://h/y 1920 1080 9f3a Main gate", b);
+    assert(ok_a && a.w == 1280 && a.id == "cam0" && a.name == "Camera");
+    assert(ok_b && b.id == "9f3a" && b.name == "Main gate" && b.h == 1080);
+    bool bad1 = parse_cam_line("rtsp://h/x", a), bad2 = parse_cam_line("", a), bad3 = parse_cam_line("rtsp://h/x 0 720", a);
+    assert(!bad1 && !bad2 && !bad3);
   }
   {  // evidence (D-039): only a JPEG of a batch that showed the decided label of that camera, generation and track
     TKey k{1, 2, 7}, other_gen{1, 3, 7}, other_cam{0, 2, 7};
