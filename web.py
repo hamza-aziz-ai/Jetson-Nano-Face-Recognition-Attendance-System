@@ -532,7 +532,10 @@ def page_system(csrf, flash, read_only=False):
 
 # ---------- device health (owner: "temperature, fan, memory, CPU/GPU load, so I can shut the service remotely") ----------
 # Read from /sys and /proc without privileges. Jetson Nano paths; on other boards missing values are left out.
-WARN_C, HOT_C = 80, 90            # the Nano throttles near 97 C and shuts down a few degrees above
+# CPU-therm throttles at 97 C and is critical at 102 C. Recognition on this board settles at 80-81 C on the CPU, so a
+# warning at 80 fired through normal running and taught the reader to ignore it; 90 leaves 7 C of warning before the
+# chip slows itself down. Measured 2026-11-07 on a Nano in a case with the stock fan; a hotter room shifts it up.
+WARN_C, HOT_C = 90, 95
 # Each sensor has its own limits, read from the board's trip points: CPU-therm throttles at 97 C and is critical at
 # 102 C, while AO-therm, the chip's always-on domain (real-time clock, wake and power management; it stays powered when
 # the rest sleeps), runs several degrees hotter by design and is not critical until 110 C. One pair of numbers for all
@@ -2724,15 +2727,15 @@ def selftest_checks():
         levels = ["bad" if v >= zone_c(k)[1] else "warn" if v >= zone_c(k)[0] else "ok" for k, v in temps.items()]
         fake["level"] = "bad" if "bad" in levels else "warn" if "warn" in levels or avail < LOW_MEM_MB else "ok"
         return health_html(fake).split("</div>")[0]
-    assert "running hot: CPU is at 85" in banner_for({"CPU": 85.0}, 2000), banner_for({"CPU": 85.0}, 2000)
+    assert "running hot: CPU is at 91" in banner_for({"CPU": 91.0}, 2000), banner_for({"CPU": 91.0}, 2000)
     assert "low on memory: 200 MB of 3963 MB free" in banner_for({"CPU": 50.0}, 200)
-    assert "running hot" in banner_for({"CPU": 85.0}, 200) and "low on memory" in banner_for({"CPU": 85.0}, 200)
-    assert "Too hot: CPU is at 92" in banner_for({"CPU": 92.0}, 2000)
+    assert "running hot" in banner_for({"CPU": 91.0}, 200) and "low on memory" in banner_for({"CPU": 91.0}, 200)
+    assert "Too hot: CPU is at 96" in banner_for({"CPU": 96.0}, 2000)
     assert "flash" not in banner_for({"CPU": 50.0}, 2000)
-    # each sensor against its own limits: AO runs hotter by design (critical at 110 C), so 87 C there is not a warning,
-    # and when the CPU is the one over its limit the message must name the CPU, not the hotter AO beside it
-    assert "flash" not in banner_for({"AO": 87.0, "CPU": 70.0, "PMIC-Die": 50.0}, 2000)
-    assert "running hot: CPU is at 81" in banner_for({"AO": 87.0, "CPU": 81.0}, 2000)
+    # normal running on this board: recognition settles near 81 C on the CPU and 87 C on AO, and must say nothing
+    assert "flash" not in banner_for({"AO": 87.0, "CPU": 81.0, "GPU": 79.0, "PMIC-Die": 50.0}, 2000)
+    # each sensor against its own limits: AO is hotter here but still inside its own, so the CPU is the one to name
+    assert "running hot: CPU is at 91" in banner_for({"AO": 92.0, "CPU": 91.0}, 2000)
     assert "before it reaches 105" in banner_for({"AO": 96.0}, 2000) and "AO is at 96" in banner_for({"AO": 96.0}, 2000)
     selftest_http()
     print("selftest ok")
