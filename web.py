@@ -185,8 +185,16 @@ def attendance(events):
             if not p.get(k) and e.get(k):
                 p[k] = e[k]
         p["sightings"] += 1
-        p["best"] = max(p["best"], e["score"])
+        if e["score"] >= p["best"]:  # the closest sighting; its own rule decides how it is shown (match_text)
+            p["best"], p["best_e"] = e["score"], e
     return people, unknown
+
+
+def match_text(e):
+    """the number of the rule that decided: "L2 0.62" (distance, 0 to 2, lower is closer) or "0.78" (cosine, -1 to 1)"""
+    if e.get("metric") == "l2" and "l2" in e:
+        return "L2 %.2f" % e["l2"]
+    return "%.2f" % e["score"]
 
 
 def enrolled():
@@ -348,10 +356,10 @@ def page_overview():
     st = status()
     recent = sorted(events, key=lambda e: e["ts"], reverse=True)[:8]
     rows = "".join(
-        "<tr><td><div class='who'>%s%s</div></td><td class='num'>%s%s</td><td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
+        "<tr><td><div class='who'>%s%s</div></td><td class='num'>%s%s</td><td class='num'>%s</td><td class='ev'>%s</td></tr>"
         % (face(e, gal), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
            "<div class='m muted'>%s</div>" % esc(e["camera_name"]) if e.get("camera_name") else "",
-           e["score"], evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
+           match_text(e), evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
     act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match</th>"
            "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % rows) if rows else \
         "<p class='empty'>No faces seen yet today.</p>"
@@ -394,10 +402,10 @@ def page_attendance(day, today):
         rows.append(
             "<tr data-name='%s'><td data-v='%s'><div class='who'>%s%s%s</div></td>"
             "<td class='num' data-v='%s'>%s</td><td class='num' data-v='%s'>%s</td><td class='num' data-v='%d'>%d</td>"
-            "<td class='num' data-v='%.3f'><meter min='0' max='1' value='%.3f'></meter>%.2f</td><td class='ev'>%s</td></tr>"
+            "<td class='num' data-v='%.3f'><meter min='0' max='1' value='%.3f'></meter>%s</td><td class='ev'>%s</td></tr>"
             % (esc(display_name(n).lower()), esc(display_name(n).lower()), face({"name": n, "snap": p["snap"]}, gal), esc(display_name(n)),
                "" if n in gal else " <small>(no longer enrolled)</small>", p["first"], hms(p["first"]), p["last"], hms(p["last"]),
-               p["sightings"], p["sightings"], p["best"], max(0.0, min(1.0, p["best"])), p["best"], evidence(p)))
+               p["sightings"], p["sightings"], p["best"], max(0.0, min(1.0, p["best"])), match_text(p.get("best_e", {"score": p["best"]})), evidence(p)))
     present = (
         "<table data-sort><thead><tr><th data-k scope='col'><button>Name</button></th><th data-k scope='col'><button>First seen</button></th>"
         "<th data-k scope='col'><button>Last seen</button></th><th data-k scope='col'><button>Sightings</button></th>"
@@ -407,8 +415,8 @@ def page_attendance(day, today):
         "<span class='chip' data-name='%s'>%s%s</span>" % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)))
         for n in absent)) if absent else "<p class='empty'>%s</p>" % ("Everyone enrolled is present." if gal else "No one is enrolled yet.")
     unknown_html = ("<div class='grid'>%s</div>" % "".join(
-        "<figure><img src='/snap/%s' alt='Unknown face at %s' loading='lazy'><figcaption>%s &middot; %.2f<br>%s</figcaption></figure>"
-        % (esc(e["snap"]), hms(e["time"]), hms(e["time"]), e["score"], evidence(e)) for e in reversed(unknown))
+        "<figure><img src='/snap/%s' alt='Unknown face at %s' loading='lazy'><figcaption>%s &middot; %s<br>%s</figcaption></figure>"
+        % (esc(e["snap"]), hms(e["time"]), hms(e["time"]), match_text(e), evidence(e)) for e in reversed(unknown))
                     ) if unknown else "<p class='empty'>No unknown faces.</p>"
     dis = 'aria-disabled="true" tabindex="-1"'
     body = """<h1>Attendance</h1><p class="sub">%s</p>
@@ -765,11 +773,14 @@ def csv_text(day):
     people, _ = attendance(read_events(day))
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["date", "name", "status", "first_seen", "last_seen", "sightings", "best_match"])
+    w.writerow(["date", "name", "status", "first_seen", "last_seen", "sightings", "match_rule", "best_match"])
     for n, p in sorted(people.items(), key=lambda kv: kv[1]["first"]):
-        w.writerow([day, display_name(n), "present", hms(p["first"]), hms(p["last"]), p["sightings"], "%.3f" % p["best"]])
+        e = p.get("best_e", {})
+        l2 = e.get("metric") == "l2" and "l2" in e  # the rule that decided: L2 distance (lower is closer) or cosine
+        w.writerow([day, display_name(n), "present", hms(p["first"]), hms(p["last"]), p["sightings"], "l2" if l2 else "cosine",
+                    "%.3f" % (e["l2"] if l2 else p["best"])])
     for n in sorted(x for x in enrolled() if x not in people):
-        w.writerow([day, display_name(n), "absent", "", "", 0, ""])
+        w.writerow([day, display_name(n), "absent", "", "", 0, "", ""])
     return buf.getvalue()
 
 
@@ -2615,6 +2626,9 @@ def selftest_checks():
     finally:
         shutil.rmtree(root)
     assert p["sightings"] == 2 and p["best"] == 0.7 and p["snap"] == "s1", p
+    # the shown number follows the rule that decided (owner: "-0.04" under L2 looked wrong)
+    assert match_text({"score": -0.035, "metric": "l2", "l2": 1.439}) == "L2 1.44" and match_text({"score": 0.78}) == "0.78"
+    assert match_text({"score": 0.6, "metric": "cosine", "l2": 0.89}) == "0.60" and match_text(p["best_e"]) == "0.70"
     assert len(unknown) == 1 and display_name("a_b") == "A B"
     assert SNAP_RE.match("2026-11-06/090000_3.jpg") and not SNAP_RE.match("../web_auth")
     assert not DATE_RE.match("2026-11-06/../../x")
