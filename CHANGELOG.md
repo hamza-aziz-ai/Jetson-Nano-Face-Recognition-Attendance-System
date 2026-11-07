@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.5] - 2026-11-07
+
+### Fixed
+
+- Every deploy left a full copy of the source on the device. `deploy/deploy.sh` cloned the release into a temporary folder and never removed it, so `/tmp` had one directory per deploy, each holding `facepipe.cpp`, `web.py` and the packaged release. Shipping the website compiled (D-043) protected one file while the build left all of them beside it. The folder is now removed on every exit, a rollback included (docs/bugs/deploy-left-source-in-tmp.md).
+
 ## [1.13.4] - 2026-11-07
 
 ### Fixed

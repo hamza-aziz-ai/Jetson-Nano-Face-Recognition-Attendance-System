@@ -12,6 +12,10 @@ APP=$(cd "$2" && pwd)
 REPO_URL=${REPO_URL:-$(git -C "$(dirname "$0")" remote get-url origin)}
 VER=${TAG#v}
 WORK=$(mktemp -d)
+# The clone holds the whole source, including facepipe.cpp. Leaving it on a device undoes the point of shipping the
+# website compiled (D-043), so it goes on every exit, rollback included (docs/bugs/deploy-left-source-in-tmp.md).
+trap 'rm -rf "$WORK"' EXIT
+# release assets; the workflow sets DIST to keep them, otherwise they go with the folder above
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
 FILES="facepipe facepipe-enroll web.py webapp.so VERSION facepipe.env.example deploy/update.sh web/layout.html web/public.html web/app.css web/app.js web/logo.svg web/favicon.svg"
