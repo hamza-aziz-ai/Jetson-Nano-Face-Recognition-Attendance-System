@@ -119,7 +119,7 @@ pre.log{margin:0;padding:1rem 1.25rem;font:12.5px/1.6 ui-monospace,SFMono-Regula
 
 /* ---- forms ---- */
 .form{display:grid;gap:1.1rem;max-width:40rem}.form.wide{max-width:none}
-.field{display:grid;gap:.35rem}.field>span{font-weight:600;font-size:.88rem;color:var(--ink2)}.field small{font-size:.8rem}
+.field{display:grid;grid-template-columns:minmax(0,1fr);gap:.35rem}.field>span{font-weight:600;font-size:.88rem;color:var(--ink2)}.field small{font-size:.8rem}
 .row{display:flex;gap:1rem;flex-wrap:wrap}.row .field{flex:1;min-width:12rem}.row .grow2{flex:2.2}
 .check{display:flex;gap:.75rem;align-items:flex-start;padding:.9rem 1rem;border:1px solid var(--line);border-radius:10px;background:#f9fafb;color:var(--ink2);cursor:pointer}
 .check input{margin:.2rem 0 0;width:18px;height:18px;flex:none;accent-color:var(--accent)}

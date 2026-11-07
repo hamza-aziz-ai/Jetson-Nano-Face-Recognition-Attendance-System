@@ -1389,7 +1389,7 @@ def page_cameras(csrf, flash="", test=None, read_only=False):
         return ("<form method='post' action='/cameras/%s'%s><input type='hidden' name='csrf' value='%s'>%s"
                 "<button class='btn %s' type='submit'>%s</button></form>" % (action, conf, csrf, hidden, cls, label))
 
-    usb_opts = "".join("<option value='%s'%s>%s (%s)</option>" % (esc(dev), " selected" if dev == cfg["usb"] else "", esc(dev), esc(name))
+    usb_opts = "".join("<option value='%s'%s>%s: %s</option>" % (esc(dev), " selected" if dev == cfg["usb"] else "", esc(name), esc(dev))
                        for dev, name in video_devices()) or "<option value='%s'>%s (not detected)</option>" % (esc(cfg["usb"]), esc(cfg["usb"]))
     size_opts = "".join("<option value='%s'%s>%s</option>" % (k, " selected" if k == cfg.get("size") else "", k.replace("x", " x "))
                         for k in SIZES)

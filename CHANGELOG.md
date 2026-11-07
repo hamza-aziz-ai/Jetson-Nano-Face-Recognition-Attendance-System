@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-11-07
+
+### Fixed
+
+- On the Cameras page the long USB camera ID ran over the CSI sensor box next to it. Form fields now stay inside their column, and each USB camera is listed by its name first, then its ID.
+
 ## [1.12.1] - 2026-11-07
 
 ### Fixed
