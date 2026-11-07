@@ -2710,6 +2710,9 @@ def selftest_checks():
         write_private(g["SERVICE_LAST"], json.dumps({"action": "stop", "by": "Hamza", "at": time.time()}))
         state, head, text = service_view()
         assert state == "stopped" and "STOPPED" in head and "Stopped by Hamza at" in text and "svc-banner stopped" in service_banner()
+        # every page carries the state it was drawn with, so app.js can tell that the banner is out of date
+        page = layout("system", "System", "<p>body</p>")
+        assert ('data-state="%s"' % status()["state"]) in page, page[:400]
         write_private(g["DESIRED"], "running")
         assert service_view()[0] in ("stopped", "no_video", "live")  # from status.json, whatever this machine has
         write_private(g["SERVICE_LAST"], "not json")

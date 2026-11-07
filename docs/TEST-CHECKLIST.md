@@ -137,6 +137,7 @@ v1.6.0 checks on the Nano (2026-11-07):
 | Check | Command | Result |
 | --- | --- | --- |
 | Device health readings | `device_health()` on the Nano | AO 77, CPU 71, GPU 69, PLL 70, PMIC 50 °C; cores 34/31/17/21 %; CPU 1224 MHz; GPU 0 % at 921 MHz; fan 63 % (no rpm sensor); 1440 of 3963 MB available; swap 406 MB used; level ok |
+| Page follows a start or stop | `python3 web.py --selftest`, then on the device: start recognition from the System page and leave the page alone | every page carries `data-state`; the banner, figures and buttons follow within 10 s with no manual refresh |
 | Health API and panel | `python3 web.py --selftest` | ok: 4 panel cards from `/api/health`, 401 without login |
 | Health warning stays quiet under normal load | rendered with the Nano's measured readings (AO 87, CPU 81, GPU 79, PMIC 50) | no banner; CPU 91 warns and names the CPU although AO 92 is hotter, AO 96 warns and counts to 105, CPU 96 is "Too hot" (2026-11-07) |
 | Health warning names the reason | `python3 web.py --selftest` | ok: hot only, low memory only, both, too hot, no banner when fine, AO at 87 °C is not a warning, CPU named over the hotter AO beside it, AO warning counts to 105 °C; made-up readings, so it runs on any machine (seen 2026-11-07 on the Nano) |
