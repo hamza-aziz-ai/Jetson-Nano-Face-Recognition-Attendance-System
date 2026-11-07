@@ -57,6 +57,33 @@
     drop.addEventListener("drop", function (e) { fin.files = e.dataTransfer.files; show(); });
   }
 
+  // video upload: the file is the request body, so the bar can show progress; the device checks it and answers JSON
+  var upf = document.getElementById("upform");
+  if (upf) upf.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var file = document.getElementById("upfile").files[0], bar = document.getElementById("upbar"),
+      msg = document.getElementById("upmsg"), btn = upf.querySelector("button");
+    if (!file) return;
+    if (file.size > +upf.dataset.limit) { msg.textContent = "The file is larger than " + Math.round(upf.dataset.limit / 1048576) + " MB."; return; }
+    var x = new XMLHttpRequest();
+    x.open("POST", "/uploads/add");
+    x.setRequestHeader("X-CSRF", upf.dataset.csrf);
+    x.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    x.upload.onprogress = function (ev) { if (ev.lengthComputable) bar.value = 100 * ev.loaded / ev.total; };
+    x.onload = function () {
+      var j = {};
+      try { j = JSON.parse(x.responseText); } catch (err) {}
+      if (x.status === 401) { location.href = "/login?next=%2Fuploads"; return; }
+      if (j.ok) { location.href = "/uploads"; return; }
+      msg.textContent = j.error || "The upload failed.";
+      btn.disabled = false; bar.hidden = true;
+    };
+    x.onerror = function () { msg.textContent = "The upload was interrupted."; btn.disabled = false; bar.hidden = true; };
+    btn.disabled = true; bar.hidden = false; bar.value = 0;
+    msg.textContent = "Uploading; the device checks the video when it has arrived.";
+    x.send(file);
+  });
+
   // System page: device health every 5 s, so a problem shows up while you look at the page
   var hp = document.getElementById("health");
   if (hp) setInterval(function () {

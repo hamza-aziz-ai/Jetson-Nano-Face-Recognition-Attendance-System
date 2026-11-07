@@ -17,3 +17,4 @@ __pycache__/
 *.pyc
 # CI header cache
 .jp/
+deploy/maintenance/.wrangler/
