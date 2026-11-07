@@ -57,6 +57,9 @@
     drop.addEventListener("drop", function (e) { fin.files = e.dataTransfer.files; show(); });
   }
 
+  // Users page: a set-password link without a configured public address is completed with this page's own address
+  document.querySelectorAll("code.link[data-rel]").forEach(function (c) { c.textContent = location.origin + c.dataset.rel; });
+
   // video upload: the file is the request body, so the bar can show progress; the device checks it and answers JSON
   var upf = document.getElementById("upform");
   if (upf) upf.addEventListener("submit", function (e) {

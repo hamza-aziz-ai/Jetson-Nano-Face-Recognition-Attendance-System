@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.9.0 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.10.0 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -92,8 +92,10 @@ sequenceDiagram
   participant S as /dev/shm/facepipe
   participant F as facepipe
   B->>W: GET / with the session cookie
-  alt no or expired session
+  alt no or expired session, or account changed
     W-->>B: 303 to /login (sign-in sets the cookie)
+  else viewer on an admin page
+    W-->>B: 403 Not available
   else login ok
     W->>D: read events-YYYY-MM-DD.jsonl, gallery.tsv, status.json
     W-->>B: page with present, absent, unknown, status
@@ -108,14 +110,14 @@ sequenceDiagram
   W-->>B: live, waiting for the camera, or stopped
 ```
 
-Key: `Handler.do_GET`, `Handler.user`, `Server.session_user`, `page`, `attendance`, `Handler.live`, `status` (`web.py`); `on_jpeg` (`facepipe.cpp`).
+Key: `Handler.do_GET`, `Handler.user`, `Server.session_principal`, `allowed`, `Handler.forbidden`, `page`, `attendance`, `Handler.live`, `status` (`web.py`); `on_jpeg` (`facepipe.cpp`).
 
-1. Every request carries the session cookie set by `/login` after the PBKDF2 check against `web_auth` (D-036).
-2. Without a valid session a page redirects to `/login`; data, video and files answer 401.
+1. Every request carries the session cookie set by `/login` (D-036): `v2.<account>.<expiry>.<mac>`; the account is the owner (`web_auth`) or a user from `web.db` (D-040). The MAC covers the account's version and password hash, so a role or password change or a deleted account signs it out.
+2. Without a valid session a page redirects to `/login`; data, video and files answer 401. `allowed` then checks the exact path and method: a viewer gets 403 on People, Video upload, Users and every change; System and Cameras show without their controls.
 3. With a login the page reads the day's events, the gallery and the status file.
 4. The page shows present, absent and unknown people and the status badge.
 5. Opening the live view requests the MJPEG stream.
-6. The web server touches `want` every 3 s while the viewer is connected.
+6. The web server touches `want` every 3 s while the viewer is connected, and checks the session again then (downloads every 2 MB or 3 s).
 7. `on_jpeg` writes `live.jpg` only while `want` is less than 10 s old, so nothing is written when no one watches.
 8. Each new frame goes to the browser as one part of the multipart response.
 9. The status badge polls every 10 s.
@@ -190,3 +192,37 @@ Key: `upload_post`, `receive_upload`, `probe_video`, `parse_discoverer`, `cleanu
 9. `run_upload` watches the bus: cancel file, service stop, time limit (3 x the duration plus 2 min, not counting waiting), free space and output size every 2 s; it writes `progress.json` for the page.
 10. On end of stream the MP4 is complete; `result.json` lists each recognized track (name, score, first and last second), the file is renamed and the state becomes `done`. The page offers the download.
 11. Any other ending deletes the partial result. A video found `processing` at start was interrupted (stop or crash) and is marked failed, never retried, so a file that crashes facepipe crashes it only once (owner accepted, 2026-11-07). Uploads are deleted 7 days after upload (owner); an upload that never finished arriving goes after an hour.
+
+## 6. User account: link, password, sign-in
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Admin
+  participant W as facepipe-web
+  participant DB as web.db
+  participant U as New user
+  A->>W: POST /users/add (name, role, email and/or phone, own password)
+  W->>DB: users row (no password yet) and account_links (hashed token, 48 h)
+  W-->>A: Users page shows the link once
+  A-->>U: sends the link himself (WhatsApp, email)
+  U->>W: GET /account/setup?t=... (only shows the form)
+  U->>W: POST /account/setup (password twice)
+  W->>DB: one transaction: delete the link, set salt, hash, version + 1
+  W-->>U: 303 to /login
+  U->>W: POST /login (email or phone, password)
+  W-->>U: session cookie v2.<account>.<expiry>.<mac>
+```
+
+Key: `page_users`, `users_post`, `issue_link`, `link_account`, `redeem_link`, `page_setup`, `Handler.setup_post`, `Handler.login_post`, `Server.find_login`, `Server.verify`, `Server.cooling`, `Server.acct_fail`, `norm_email`, `norm_phone`, `pw_problem`, `public_origin` (`web.py`).
+
+1. Every Users-page change needs the admin's current password (`Server.verify`); the email is lower-cased, the phone must have `+` and a country code.
+2. The account has no password yet; the link token is 128 bits, stored as a hash, one per account (a new one replaces the old).
+3. The link is built from `FACEPIPE_PUBLIC_URL`, or shown as a path that the page completes with its own address.
+4. The device sends nothing; the admin passes the link on.
+5. Opening the link does not use it, so chat-app previews are harmless.
+6. The password needs 15 to 256 characters and must not be the name, email or phone.
+7. Deleting the link and storing the password happen in one transaction: of two simultaneous submissions only one succeeds.
+8. The user is not signed in automatically.
+9. `Server.find_login` finds the owner by user name or an account by email or phone; `Server.verify` hashes even for unknown names; after 5 failures the account pauses up to 30 s (`Server.cooling`).
+10. The cookie's MAC binds the account, its version and its password hash.

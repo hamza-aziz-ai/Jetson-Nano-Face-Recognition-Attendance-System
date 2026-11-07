@@ -4,7 +4,7 @@ Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "S
 
 ## Versions
 
-- `main`: v1.9.0 (two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
+- `main`: v1.10.0 (user accounts, D-040; v1.9.0 two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
 - Camera in use: the owner's phone over RTSP (chosen on the Cameras page); face matching L2 <= 0.90 (System page).
 
 ## Device
@@ -42,7 +42,7 @@ Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "S
 
 ## Next (owner)
 
-1. Users from the admin portal (owner, 2026-11-07): admin (everything) and viewer (attendance only, e.g. family), added by email, phone number or both. Security design: council with Codex first.
+1. After v1.10.0 deploys: add `FACEPIPE_PUBLIC_URL=https://attendance.hamzaaziz.dev` to the Nano's `facepipe.env` (owner approved 2026-11-07) and restart facepipe-web; owner uploads the social preview PNG on GitHub (Settings, Social preview).
 2. Reconnect test of two cameras: the owner switches the phone stream off and on (needs the owner); then the hardware gate of D-039 on a 5 V 4 A barrel supply.
 
 ## Still open

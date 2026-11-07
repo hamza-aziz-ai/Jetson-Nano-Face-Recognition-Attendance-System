@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-07
+
+### Added
+
+- User accounts (owner): a Users page for administrators adds people by email, phone number (with country code) or both, as **admin** or **viewer**. Viewers see everything (Overview, Live, Attendance, CSV, faces, evidence, clips, the System and Cameras pages without their controls) but change nothing and do not see People, Video upload or Users (owner's choice). The device sends no email or SMS: the admin gets a single-use set-password link (48 h) to pass on. Design agreed with Codex in a council (D-040).
+- Your account page: every user's own sign-in names and password change.
+- New favicon, and a GitHub social preview (`docs/social-preview.svg`).
+
+### Changed
+
+- Sign-in accepts an email, a phone number or the owner's user name. All sessions start again once after this update (new cookie format). A role or password change, or deleting an account, ends that account's sessions at once; downloads and the live view stop too.
+- New passwords need at least 15 characters (NIST SP 800-63-4), also for `--set-password`; spaces are allowed.
+- After 5 wrong passwords an account pauses briefly (up to 30 s), besides the existing per-visitor limit.
+
 ## [1.9.0] - 2026-11-07
 
 ### Added
