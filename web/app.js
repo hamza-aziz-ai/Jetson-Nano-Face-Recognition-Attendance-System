@@ -181,7 +181,13 @@
     document.getElementById("dlg-ok").addEventListener("click", function () {
       var f = pending;
       dlg.close();
-      if (f) { f.querySelector("button").disabled = true; f.submit(); }  // form.submit() skips the submit handler
+      if (f) {
+        var b = f.querySelector("button"), a = f.querySelector("input[name=action]");
+        b.disabled = true;
+        // service actions say what is happening until the page comes back (owner: the state must be very clear)
+        if (a) b.textContent = { start: "Starting…", stop: "Stopping…", restart: "Restarting…" }[a.value] || b.textContent;
+        f.submit();  // form.submit() skips the submit handler
+      }
     });
     dlg.addEventListener("click", function (e) { if (e.target === dlg) { pending = null; dlg.close(); } });  // click outside
   }

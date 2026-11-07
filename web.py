@@ -299,6 +299,7 @@ def layout(page_id, title, body, flash="", refresh=False):
         kind, text = FLASH[flash]
         msg = "<div class='flash %s' role='status'>%s</div>" % (kind, esc(text))
     return LAYOUT.substitute(title=esc(title), site=esc(SITE), page=page_id, refresh="1" if refresh else "0", nav=nav,
+                             banner=service_banner(),
                              who=esc(p["name"]) if p else "",
                              state=st["state"], detail=esc(st["detail"]), flash=msg, body=body, version=esc(VERSION),
                              now=hms(datetime.datetime.now().isoformat()))
@@ -478,6 +479,7 @@ def page_system(csrf, flash, read_only=False):
     logdir = os.path.join(LOG_ROOT, str(now.year), MONTHS[now.month - 1])
     log_lines = [l for l in tail(os.path.join(logdir, "facepipe.log"), 40) if "TensorRT" not in l][-15:]
     upd = tail(os.path.join(logdir, "update.log"), 3)
+    sv = service_view()
 
     def button(action, label, cls, confirm):
         return ("<form method='post' action='/system/service' data-confirm='%s' data-title='%s the recognition service?' "
@@ -493,6 +495,7 @@ def page_system(csrf, flash, read_only=False):
 <section aria-labelledby="h-health"><div class="sh"><h2 id="h-health">Device health</h2><span class="count">refreshes every 5 s</span></div>
 <div id="health">%s</div></section>
 <section aria-labelledby="h-svc"><div class="sh"><h2 id="h-svc">Recognition service</h2><span class="pill %s">%s</span></div>
+<div class="svc-big %s"><b>%s</b><span>%s</span></div>
 <dl class="kv"><dt>systemd state</dt><dd>%s</dd><dt>Wanted state</dt><dd>%s</dd><dt>Frame rate</dt><dd>%s</dd>
 <dt>Detections per second</dt><dd>%s</dd><dt>Frames processed</dt><dd>%s</dd><dt>Camera</dt><dd>%s</dd></dl>
 <div class="actions">%s</div></section>
@@ -503,7 +506,7 @@ def page_system(csrf, flash, read_only=False):
 <dt>Last update check</dt><dd>%s</dd></dl></section>
 <section aria-labelledby="h-log" class="noprint"><div class="sh"><h2 id="h-log">Recent log</h2><span class="count">facepipe.log</span></div>
 <pre class="log">%s</pre></section>""" % (
-        health_html(device_health()), st["state"], esc(st["detail"]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
+        health_html(device_health()), st["state"], esc(st["detail"]), sv[0], esc(sv[1]), esc(sv[2]), esc(active), "running" if desired != "stopped" else "stopped (kept across updates)",
         "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
         st.get("frames", "&ndash;"), esc(camera_label()), buttons,
         "cosine &ge; %.2f" % matching()["cosine"] if matching()["metric"] == "cosine" else "L2 &le; %.2f" % matching()["l2"],
@@ -676,6 +679,7 @@ def matching_html(csrf):
 
 
 # ---------- service control (D-033): exact sudoers rule for start/stop/restart of facepipe only ----------
+SERVICE_LAST = os.path.join(DATA, "service-last.json")  # the last start, stop or restart: action, who, when
 DESIRED = os.path.join(DATA, "desired")              # "stopped" keeps facepipe stopped across updates (deploy.sh reads it)
 LOCK = os.path.join(DATA, "update", "lock")          # shared with deploy/update.sh: no action during an update
 SYSTEMCTL = "/bin/systemctl"
@@ -697,7 +701,7 @@ def read_desired():
         return "running"
 
 
-def service_action(action):
+def service_action(action, who="the website"):
     """runs `sudo -n systemctl <action> facepipe` under the update lock; returns a FLASH key"""
     if action not in ACTIONS:
         return "denied"
@@ -719,8 +723,42 @@ def service_action(action):
     if r.returncode != 0:
         LOG.write("ERROR", "service %s failed: %s" % (action, r.stderr.decode(errors="replace").strip()[:300]))
         return "failed"
-    LOG.write("INFO", "service %s from the website; now %s" % (action, service_state()))
+    LOG.write("INFO", "service %s from the website by %s; now %s" % (action, who, service_state()))
+    write_private(SERVICE_LAST, json.dumps({"action": action, "by": who, "at": time.time()}))
     return {"start": "started", "stop": "stopped", "restart": "restarted"}[action]
+
+
+def last_action():
+    """e.g. "Stopped by Hamza at 11:30 AM", or "" """
+    try:
+        with open(SERVICE_LAST, encoding="utf-8") as f:
+            a = json.load(f)
+        t = datetime.datetime.fromtimestamp(a["at"])
+        day = "" if t.date() == datetime.date.today() else t.strftime(" on %d %b")
+        return "%s by %s at %s%s" % ({"start": "Started", "stop": "Stopped", "restart": "Restarted"}[a["action"]], a["by"],
+                                     hm(t.isoformat()), day)
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def service_view():
+    """(css state, headline, explanation) of recognition, from the wanted state and facepipe's own reports"""
+    st, desired, last = status(), read_desired(), last_action()
+    if desired == "stopped":
+        return "stopped", "Recognition is STOPPED", "No attendance is recorded and the live view is off. %s." % (last or "Stopped from the website")
+    if st["state"] == "stopped":
+        return "stopped", "Recognition is NOT RUNNING", "It should be running: it may be starting or restarting; if this stays for a minute, see the System page."
+    if st["state"] == "no_video":
+        return "no_video", "Recognition is RUNNING but has NO CAMERA PICTURE", "No attendance is recorded until the camera answers."
+    return "live", "Recognition is RUNNING", st["detail"] + (". " + last + "." if last else ".")
+
+
+def service_banner():
+    """on every page while recognition is not running normally, so a stop is never missed (owner, 2026-11-07)"""
+    state, head, text = service_view()
+    if state == "live":
+        return ""
+    return ("<div class='svc-banner %s' role='alert'><b>%s.</b> %s <a href='/system'>System page</a></div>" % (state, esc(head), esc(text)))
 
 
 def csv_text(day):
@@ -2360,7 +2398,7 @@ class Handler(BaseHTTPRequestHandler):
             with _enroll_lock:
                 return self.redirect("/system?msg=" + save_matching(form))
         if path == "/system/service":
-            return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0]))
+            return self.redirect("/system?msg=" + service_action(form.get("action", [""])[0], user["name"]))
         if path == "/people/invite":
             person = form.get("person", [""])[0]
             if person and person not in enrolled():
@@ -2588,6 +2626,24 @@ def selftest_checks():
     salt = b"x" * 16
     assert hmac.compare_digest(hash_pw("secret12", salt), hash_pw("secret12", salt))
     assert service_action("rm -rf") == "denied" and camera_label() in camera_label()
+    # the service's state on every page (owner, 2026-11-07): a wanted stop says who and when
+    import tempfile
+    g = globals()
+    saved = g["DESIRED"], g["SERVICE_LAST"]
+    tmp = tempfile.mkdtemp()
+    g["DESIRED"], g["SERVICE_LAST"] = os.path.join(tmp, "desired"), os.path.join(tmp, "last")
+    try:
+        write_private(g["DESIRED"], "stopped")
+        write_private(g["SERVICE_LAST"], json.dumps({"action": "stop", "by": "Hamza", "at": time.time()}))
+        state, head, text = service_view()
+        assert state == "stopped" and "STOPPED" in head and "Stopped by Hamza at" in text and "svc-banner stopped" in service_banner()
+        write_private(g["DESIRED"], "running")
+        assert service_view()[0] in ("stopped", "no_video", "live")  # from status.json, whatever this machine has
+        write_private(g["SERVICE_LAST"], "not json")
+        assert last_action() == ""
+    finally:
+        g["DESIRED"], g["SERVICE_LAST"] = saved
+        shutil.rmtree(tmp)
     assert save_matching({"metric": ["l2"], "cosine": ["0.5"], "l2": ["2.0"]}) == "match_bad"  # out of range: nothing written
     assert not os.path.exists(MATCH_CONF) and "Cosine similarity" in matching_html("t")
     h = device_health()  # whatever this machine exposes; the panel must render either way
