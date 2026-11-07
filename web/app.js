@@ -13,9 +13,19 @@
     }
     return r;
   }
+  // Cloudflare answered for the device (tunnel down 530, website down 502, connection errors 504, 520-529): reload,
+  // so the page address shows the maintenance page (D-037); /api/ itself bypasses that Worker. On the LAN a down
+  // device makes fetch fail instead, and the pill says so.
+  function reachable(r) {
+    if (r.status === 502 || r.status === 504 || (r.status >= 520 && r.status <= 530)) {
+      out = true; setLive(false); location.reload();
+      throw new Error("device down");
+    }
+    return r;
+  }
   function poll() {
     fetch("/api/status", { credentials: "same-origin", cache: "no-store" })
-      .then(signedIn).then(function (r) { return r.json(); })
+      .then(reachable).then(signedIn).then(function (r) { return r.json(); })
       .then(function (s) {
         pill.className = "pill " + s.state; pill.textContent = s.detail;
         // the web server restarted (an update) or came back: its old video connection is gone, open a new one
@@ -152,7 +162,7 @@
     // dropped stream: retry after 3 s if still signed in (a 401 goes to the sign-in page instead of retrying forever)
     img.addEventListener("error", function () {
       if (playing && !out) setTimeout(function () {
-        fetch("/api/status", { credentials: "same-origin", cache: "no-store" }).then(signedIn)
+        fetch("/api/status", { credentials: "same-origin", cache: "no-store" }).then(reachable).then(signedIn)
           .then(function () { liveRestart(); }).catch(function () {});
       }, 3000);
     });

@@ -19,9 +19,9 @@ What is already on the device (`deploy/cloudflared-facepipe.service`):
 
 ## Maintenance page (D-037)
 
-When the Nano cannot answer (tunnel down: Cloudflare error 1033 / HTTP 530; cloudflared up but the website down: 502; connection errors 504 and 520-529), the Worker in `deploy/maintenance/worker.js` shows a "Down for maintenance" page in the site's look with HTTP 503 and `Retry-After: 30`, and the page reloads every 30 seconds until the site answers again. Any answer from the website itself, its own 503s included, passes through unchanged.
+When the Nano cannot answer (tunnel down: Cloudflare error 1033 / HTTP 530; cloudflared up but the website down: 502; connection errors 504 and 520-529), the Worker in `deploy/maintenance/worker.js` shows a "Down for maintenance" page in the site's look with HTTP 503 and `Retry-After: 30`, and the page reloads every 30 seconds until the site answers again. A page already open switches to it by itself: its 10 s status check sees the Cloudflare error and reloads the page. Any answer from the website itself, its own 503s included, passes through unchanged.
 
-It runs only on the page addresses (`/`, `/live`, `/attendance*`, `/people*`, `/cameras*`, `/system*`, `/login*`, `/register*`), so the status polls, files and clips never count against the Workers free plan (100,000 requests a day). Remove it with `npx wrangler delete --name facepipe-maintenance`.
+It runs only on the page addresses (`/`, `/live`, `/attendance*`, `/people*`, `/cameras*`, `/system*`, `/login*`, `/register*`, `/uploads*`, `/users*`, `/account*`), so the status polls, files and clips never count against the Workers free plan (100,000 requests a day). Remove it with `npx wrangler delete --name facepipe-maintenance`.
 
 ## How it fits the site
 

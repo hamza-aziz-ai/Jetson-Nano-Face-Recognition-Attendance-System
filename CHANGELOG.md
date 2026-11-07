@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.3] - 2026-11-07
+
+### Fixed
+
+- Over the internet, a page that was already open when the device went down kept saying "Page cannot reach the device"; the maintenance page appeared only after a manual refresh. The page's 10 s status check now reloads it when Cloudflare answers for the device, so it switches to the maintenance page by itself, and back to the site when the device returns. The maintenance page now also covers Uploads, Users and Account (run `sh deploy/maintenance/deploy.sh <hostname>` once to add those routes).
+
 ## [1.12.2] - 2026-11-07
 
 ### Fixed

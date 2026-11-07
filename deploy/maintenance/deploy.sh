@@ -6,7 +6,7 @@ set -eu
 h=${1:?usage: deploy.sh <hostname>}
 cd "$(dirname "$0")"
 set --
-for p in "" "live" "attendance*" "people*" "cameras*" "system*" "login*" "register*"; do
+for p in "" "live" "attendance*" "people*" "cameras*" "system*" "login*" "register*" "uploads*" "users*" "account*"; do
   set -- "$@" --route "$h/$p"
 done
 npx --yes wrangler deploy worker.js --name facepipe-maintenance --compatibility-date 2026-11-01 --no-bundle "$@"
