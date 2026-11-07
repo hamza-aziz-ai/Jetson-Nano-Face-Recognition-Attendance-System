@@ -374,7 +374,7 @@ Options:
 
 Chosen: 3 (owner asked for a custom maintenance page "shown when tunnel is broken" and signed in to Cloudflare with `wrangler login` for it). `deploy/maintenance/worker.js`, no dependencies: HTTP 530, 502, 504 and 520-529 from the origin, or a failed fetch, become a 503 page in the site's look with `Retry-After: 30` and a 30 s reload; the website's own answers, its 503s included, pass through. Routes only on page addresses (`deploy/maintenance/deploy.sh <hostname>`).
 Why: when the tunnel or the Nano is down, the request never reaches the device, so the page must live at Cloudflare. A Worker is code in the repository and works on the free plan; it runs only on page addresses so the status polls (every 5-10 s per open page), files and clips do not count against the 100,000 requests a day.
-Trade-off: Pages now pass through a Worker (about 1 ms); if the daily limit were ever reached, those page requests would fail until the next day (remove with `npx wrangler delete --name facepipe-maintenance`). Status polls and the live stream still get Cloudflare's error while the device is down; the open page then says it cannot reach the device.
+Trade-off: Pages now pass through a Worker (about 1 ms); if the daily limit were ever reached, those page requests would fail until the next day (remove with `npx wrangler delete --name facepipe-maintenance`). Status polls and the live stream still get Cloudflare's error while the device is down; since v1.12.3 an open page that sees that error in its status poll reloads itself, so it shows the maintenance page too.
 Revisit if: traffic grows near the free limit, or a plan with custom error pages is bought.
 
 ## D-038: Log a person at most once per 5 minutes (owner, same rule as the CCTV system)
