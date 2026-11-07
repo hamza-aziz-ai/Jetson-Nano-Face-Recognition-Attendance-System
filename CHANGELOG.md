@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.6] - 2026-11-07
+
+### Fixed
+
+- The update scripts and the documents stated that the repository is private, which is a setting that changes. A failed release check now says "offline, or the repository is private and gh_token is missing" instead of asserting the cause, and `install.sh` says the token is needed only while the repository is private. The behaviour was always correct either way; only the wording was not.
+
 ## [1.13.5] - 2026-11-07
 
 ### Fixed
