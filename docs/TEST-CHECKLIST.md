@@ -33,6 +33,7 @@ The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG
 | Users and roles | `python3 web.py --selftest` | `selftest ok` (D-040 cases: links, sign-in names, viewer 403 matrix, revocation, cooldown, closed on database failure; seen 2026-11-07 on the Nano) |
 | RTSP local network only | DESCRIBE from a laptop on the home network, then VLC on mobile data | `200 OK` at home (seen 2026-11-07); 403 from mobile data (to do) |
 | Recognition state banner | stop recognition on the System page, open any page | red banner "Recognition is STOPPED ... Stopped by <name> at <time>" on Overview and System (seen 2026-11-07 on a test instance) |
+| Unknown-face quality | `./facepipe --selftest`; a recorded clip as camera | selftest ok (template clear; nose shift fails on yaw; 180-degree roll clear; dark; unknown or upscaled camera size; cut off); clip: the owner recognized at yaw 0.37, small side faces measured `small` (seen 2026-11-07); calibration on the owner's face still to do |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |
 | Live run | `FACEPIPE_DIR=. timeout -s INT 60 ./facepipe <source> 1920 1080` | `[facepipe] fps` near 15 with `FACEPIPE_DROP=2` on a 30 fps camera; known faces counted |
 | Embeddings vs reference | `python -I check_vs_rest.py <photos> <dir with faces.jsonl>` | Matching photos at cosine 0.96 or more |

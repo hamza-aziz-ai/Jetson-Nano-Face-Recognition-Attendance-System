@@ -16,7 +16,7 @@ All data lives on the device. None of it is in the repository.
 | Tunnel token | `/etc/cloudflared/facepipe-tunnel.env` (root, 0600) | `TUNNEL_TOKEN=` | The secret that lets cloudflared serve the site's hostname | Until the owner replaces or deletes the tunnel |
 | Face matching | `data/matching.conf` (0600) | `metric=`, `cosine=`, `l2=` | The match rule chosen on the System page | Until changed |
 | Gallery | `data/gallery.tsv` | One line per photo: name TAB 512 floats | Face embeddings | Rebuilt by `facepipe-enroll` |
-| Attendance events | `data/events-YYYY-MM-DD.jsonl` | JSON lines: time, ts, track, name, score (cosine), metric, l2, det, snap, frame, clip, camera, camera_name (from v1.9.0) | Who was seen when | Forever (small) |
+| Attendance events | `data/events-YYYY-MM-DD.jsonl` | JSON lines: time, ts, track, name, score (cosine), metric, l2, det, snap, frame, clip, camera, camera_name (from v1.9.0), q (quality of the saved picture, from v1.12.0) | Who was seen when | Forever (small) |
 | Face snapshots | `data/snaps/YYYY-MM-DD/HHMMSS_track.bmp` (older: .jpg) | 112x112 aligned faces | Faces of everyone seen, including unknowns | Forever (about 37 KB each) |
 | Evidence frames | `/mnt/rec/YYYY-MM-DD/HHMMSS_track.jpg` | 1080p JPEG with box and name | Whole scene | Until rotation |
 | Event clips | `/mnt/rec/YYYY-MM-DD/HHMMSS_clip.mp4` | H.264 MP4, about 8 s | Whole scene | Until rotation (oldest week deleted at 90% full) |

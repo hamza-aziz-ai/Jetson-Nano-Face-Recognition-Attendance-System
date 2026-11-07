@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-07
+
+### Changed
+
+- Unknown faces are logged only from a clear view (owner's choice, after 25 "unknowns" in a morning that were mostly the owner at bad angles): roughly frontal, eyes at least 28 px apart in the camera's own resolution, not cut off at the picture's edge, not too dark. The clearest try of each face is the one saved. A face that never shows clearly is labelled Unknown on screen but nothing is saved (counted as `unclear` in the log); if it turns clear later it gets one more try. Known people are recognized exactly as before. Each event records the quality numbers of its picture, and the limits can be tuned with `FACEPIPE_UNKNOWN_*` settings. Agreed with Codex in a council (D-042).
+
+### Fixed
+
+- A recognition try that failed before reaching recognition (queue full, picture not readable) used up one of the face's 5 tries; it no longer does.
+
 ## [1.11.3] - 2026-11-07
 
 ### Changed
