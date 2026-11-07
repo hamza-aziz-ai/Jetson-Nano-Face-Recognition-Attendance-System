@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.1.0 (2026-11-06). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.8.1 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -51,9 +51,11 @@ flowchart TD
   K -->|"`no`"| TR{"`(7) 5 tries used?`"}:::decision
   TR -->|"`no`"| RT["`(8) Track retried later`"]:::outcome
   TR -->|"`yes`"| UN["`(9) Unknown: track done`"]:::outcome
-  KN --> C["`(10) Start or extend event clip`"]:::step
-  UN --> C
-  C --> EV["`(11) Save evidence frame with name drawn`"]:::step --> LOG[("`(12) events-YYYY-MM-DD.jsonl and face snapshot`")]:::store
+  KN --> RP{"`(10) Same person logged in the last 5 min?`"}:::decision
+  UN --> RP
+  RP -->|"`yes`"| SK["`Repeat: nothing logged, label still shown`"]:::outcome
+  RP -->|"`no`"| C["`(11) Start or extend event clip`"]:::step
+  C --> EV["`(12) Save evidence frame with name drawn`"]:::step --> LOG[("`(13) events-YYYY-MM-DD.jsonl and face snapshot`")]:::store
   C -. "`recordings volume not writable`" .-> NOREC["`No clip or evidence, event still logged`"]:::error
   classDef entry fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
   classDef step fill:#dcfce7,stroke:#15803d,color:#14532d
@@ -63,7 +65,7 @@ flowchart TD
   classDef store fill:#f3f4f6,stroke:#6b7280,color:#111827
 ```
 
-Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `passes`, `l2_of`, `clip_trigger`, `save_evidence`, `log_event`, `write_bmp` (all in `facepipe.cpp`); settings `FACEPIPE_METRIC`, `FACEPIPE_MATCH`, `FACEPIPE_L2_MATCH`.
+Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `passes`, `l2_of`, `repeat`, `seed_repeats`, `clip_trigger`, `save_evidence`, `log_event`, `write_bmp` (all in `facepipe.cpp`); settings `FACEPIPE_METRIC`, `FACEPIPE_MATCH`, `FACEPIPE_L2_MATCH`.
 
 1. `rec_worker` waits on the job queue.
 2. `gallery.tsv` is reloaded when its modification time changes, so enrollment needs no restart.
@@ -74,9 +76,10 @@ Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `pas
 7. Below the threshold the try count decides.
 8. Fewer than 5 tries: the track gets another attempt (FLOW 1, step 7).
 9. On the 5th try the track is done as Unknown; the label turns red.
-10. `clip_trigger` starts an MP4 clip from the ring buffer (3 s back) or extends the current one by 5 s.
-11. `save_evidence` waits for the next annotated frame (name drawn) and writes it as a 1080p JPEG.
-12. `log_event` writes a 112x112 BMP face snapshot and appends one JSON line with time, name, cosine score, metric, L2 distance, snapshot, frame and clip.
+10. `repeat` applies the CCTV system's 5-minute rule (D-038): a name logged in the last 5 minutes, or an unknown face that would match an unknown logged in the last 5 minutes, writes nothing (no clip, frame, snapshot or event; counted as `repeats` in the fps log line). `seed_repeats` loads today's named events at start, so a restart does not log the same people again.
+11. `clip_trigger` starts an MP4 clip from the ring buffer (3 s back) or extends the current one by 5 s.
+12. `save_evidence` waits for the next annotated frame (name drawn) and writes it as a 1080p JPEG.
+13. `log_event` writes a 112x112 BMP face snapshot and appends one JSON line with time, name, cosine score, metric, L2 distance, snapshot, frame and clip.
 
 ## 3. Dashboard and live view
 

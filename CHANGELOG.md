@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-07
+
+### Fixed
+
+- Duplicate entries (owner): the same person was logged again each time the tracker lost and found the face, seconds apart. Now the CCTV system's 5-minute rule applies: a person already logged in the last 5 minutes is not logged again (no event, snapshot, frame or clip), and an unknown face is not logged again if it matches an unknown face logged in the last 5 minutes. A restart keeps the rule for known people (D-038).
+
 ### Added
 
 - Maintenance page (owner): when the Nano cannot be reached through the Cloudflare Tunnel, a Cloudflare Worker (`deploy/maintenance/`) shows "Down for maintenance" in the site's look and reloads every 30 s, instead of Cloudflare's error page (D-037).
