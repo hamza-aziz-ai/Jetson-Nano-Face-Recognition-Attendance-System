@@ -28,6 +28,17 @@
       .then(reachable).then(signedIn).then(function (r) { return r.json(); })
       .then(function (s) {
         pill.className = "pill " + s.state; pill.textContent = s.detail;
+        // Only this pill is updated here. The banner on every page, the dot in the sidebar and the System page's
+        // figures and buttons are drawn by the server, so after recognition starts or stops the page keeps showing the
+        // old state until it is loaded again (owner: "It only goes after a deliberate refresh"). A state that no
+        // longer matches the one the page was drawn with is the signal to load it again. Not while something is being
+        // typed: that would throw the entry away, and the next poll picks it up anyway.
+        var drawn = document.body.dataset.state, el = document.activeElement;
+        if (drawn && s.state !== drawn && !(el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))) {
+          document.body.dataset.state = s.state;  // the reload takes a moment; do not ask for a second one
+          location.reload();
+          return;
+        }
         // the web server restarted (an update) or came back: its old video connection is gone, open a new one
         if ((started !== null && s.web_started !== started) || !reach) liveRestart();
         started = s.web_started; reach = true;

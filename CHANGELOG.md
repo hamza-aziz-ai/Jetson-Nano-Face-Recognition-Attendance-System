@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.7] - 2026-11-07
+
+### Fixed
+
+- After starting or stopping recognition, every page kept showing the old state until it was refreshed by hand: the "Recognition is NOT RUNNING" banner stayed up while the service was already running at full frame rate, and the System page's figures and buttons went with it. Only the small pill in the corner was being updated. Each page now carries the state it was drawn with, and the status check that already runs every 10 seconds reloads the page when the real state no longer matches. It waits while something is being typed, so a half-filled form is never thrown away.
+
 ## [1.13.6] - 2026-11-07
 
 ### Fixed
