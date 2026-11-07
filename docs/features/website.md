@@ -20,3 +20,7 @@ Proof: `python3 web.py --selftest` starts a real server on a free port and check
 ## Recognition state (v1.11.0, owner)
 
 A banner on every page while recognition is stopped (red, with who stopped it and when, from `data/service-last.json`), not running although it should be (red) or without a camera picture (amber), linking to the System page. The System page shows the state in large type. After confirming, the Start, Stop and Restart buttons read "Starting…", "Stopping…" or "Restarting…" until the page comes back.
+
+## Match numbers (v1.11.2)
+
+The Match and Best match columns show the number of the rule that decided: `L2 0.87` (distance from 0 to 2, lower is closer; recognized at or below the L2 setting) or `0.78` (cosine from -1 to 1, higher is closer). The CSV says which in `match_rule`.
