@@ -1295,8 +1295,13 @@ def with_login(url, user, pw):
     return url.replace(u.netloc, "%s:%s@%s" % (quote(user, safe=""), quote(pw, safe=""), host), 1)
 
 
-def video_devices():
-    """USB cameras only: CSI sensors also appear as /dev/videoN, named vi-output by the Tegra driver"""
+def video_devices(by_id="/dev/v4l/by-id"):
+    """USB cameras only: CSI sensors also appear as /dev/videoN, named vi-output by the Tegra driver. Each camera is named
+    by its udev by-id link (vendor, model, serial), which survives replugging and reboots; /dev/videoN can change
+    (ponytail: two identical cameras without a serial share one by-id link; the second falls back to /dev/videoN)"""
+    ids = {}
+    for link in sorted(glob.glob(os.path.join(by_id, "*-video-index0"))):
+        ids.setdefault(os.path.realpath(link), link)
     out = []
     for d in sorted(glob.glob("/sys/class/video4linux/video*")):
         try:
@@ -1304,7 +1309,8 @@ def video_devices():
         except OSError:
             continue
         if not name.startswith("vi-output"):
-            out.append(("/dev/" + os.path.basename(d), name))
+            dev = "/dev/" + os.path.basename(d)
+            out.append((ids.get(dev, dev), name))
     return out
 
 

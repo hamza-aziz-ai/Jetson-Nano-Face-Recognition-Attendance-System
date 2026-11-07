@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-11-07
+
+### Fixed
+
+- A USB camera chosen on the Cameras page is now saved by its stable ID (`/dev/v4l/by-id/...`: vendor, model, serial) instead of `/dev/videoN`. After the Wi-Fi card was fitted the webcam came back as `/dev/video0` instead of `/dev/video1`, and recognition stopped until the camera was chosen again. Choose the USB camera once more on the Cameras page to switch to the ID.
+
 ## [1.12.0] - 2026-11-07
 
 ### Changed
