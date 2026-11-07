@@ -326,10 +326,11 @@ Every bug has a write-up in [docs/bugs/](docs/bugs/).
 | Path | Purpose |
 | --- | --- |
 | `facepipe.cpp` | DeepStream pipeline, detection probe and SCRFD decoding, alignment, recognition worker, video outputs, RTSP server, logging, enrollment (`-DFACEPIPE_ENROLL`) |
-| `web.py`, `web/` | Website (5 pages, service control), CSV export, live MJPEG view, evidence files, login management |
+| `web.py`, `web/` | Website (5 pages, service control), CSV export, live MJPEG view, evidence files, login management. A deploy compiles it into `webapp.so` and leaves a two-line `web.py` that starts it (D-043) |
 | `facepipe.env.example` | All runtime settings |
 | `deploy/install.sh` | One-step install: build, engines, self-tests, `facepipe.env`, services and update timer for the current user and folder |
 | `deploy/deploy.sh`, `deploy/update.sh` | Release deploy with health check and rollback; the automatic update check |
+| `deploy/compile-web.sh` | Compiles `web.py` into `webapp.so` with Nuitka, so a release carries no readable Python (D-043) |
 | `deploy/*.in` | systemd unit templates (filled in by `install.sh`) |
 | `deploy/cloudflared-facepipe.service` | Optional Cloudflare Tunnel service for remote access (docs/REMOTE-ACCESS.md) |
 | `deploy/maintenance/` | Optional Cloudflare Worker: maintenance page while the device cannot be reached (D-037) |

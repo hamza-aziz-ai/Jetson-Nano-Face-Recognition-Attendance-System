@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-07
+
+### Changed
+
+- The website now ships as compiled machine code. Every deploy turns `web.py` into `webapp.so` with Nuitka and leaves a two-line `web.py` that starts it, so an installed device carries no readable Python (D-043). Nothing changes in how the site is used or run: the same `python3 web.py --selftest`, `--set-password` and `--set-rtsp-password` commands work. A device needs Nuitka for updates to succeed: `pip3 install --user nuitka==4.3.4`.
+
+### Fixed
+
+- Every page asked the device for an icon that no release had ever shipped, and the server answered by closing the connection instead of saying "not found". `web/favicon.svg` is now in the shipped file list, and a missing file answers 404 (docs/bugs/favicon-missing-500.md).
+
 ## [1.12.3] - 2026-11-07
 
 ### Fixed

@@ -2119,6 +2119,10 @@ class Handler(BaseHTTPRequestHandler):
     def file(self, path, ctype=None, cache="private, max-age=86400"):
         """file with HTTP Range support (browsers need it to seek in MP4 clips), streamed in 64 KB chunks"""
         ctype = ctype or CTYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream")
+        # a missing file is a 404, not an exception in the handler thread: that drops the connection with no answer,
+        # and every caller here (static assets, clips, evidence photos) can be asked for a file that is not there
+        if not os.path.isfile(path):
+            return self.send(404, "Not found", "text/plain; charset=utf-8")
         size = os.path.getsize(path)
         m = re.match(r"^bytes=(\d*)-(\d*)$", self.headers.get("Range", ""))
         start, end, partial = 0, size - 1, bool(m and (m.group(1) or m.group(2)))
@@ -2714,6 +2718,13 @@ def selftest_http():
     good = selftest_login(srv, get, host)
     assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 404
     assert get("/static/favicon.svg", auth=None)[1]["Content-Type"] == "image/svg+xml"
+    # a file the release forgot to ship must answer 404, not drop the connection (docs/bugs/favicon-missing-500.md)
+    logo = os.path.join(WEB_DIR, "logo.svg")
+    os.rename(logo, logo + ".hidden")
+    try:
+        assert get("/static/logo.svg", auth=None)[0] == 404
+    finally:
+        os.rename(logo + ".hidden", logo)
     assert all(lan_address(a) for a in ("192" ".168.0.9", "10" ".1.2.3", "172" ".16.0.1", "127.0.0.1", "fe80::1", "fd00::3",
                                         "::ffff:192" ".168.0.9"))  # private examples in two pieces: ci/scan.sh
     assert not any(lan_address(a) for a in ("8.8.8.8", "100.64.0.1", "2401:4900::1", "::ffff:8.8.8.8", "x"))
@@ -3090,7 +3101,9 @@ def selftest_registration(get, host):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-if __name__ == "__main__":
+# a function, not a bare block, so the compiled build can call it: there web.py is a two-line stub and this file is
+# webapp.so (D-043)
+def main():
     if sys.argv[1:2] == ["--set-password"] and len(sys.argv) == 3:
         set_password(sys.argv[2])
     elif sys.argv[1:2] == ["--set-rtsp-password"] and len(sys.argv) == 3:
@@ -3103,3 +3116,7 @@ if __name__ == "__main__":
         srv = Server(("0.0.0.0", PORT), Handler)
         LOG.write("INFO", "web %s: attendance page on port %d, data %s" % (VERSION, PORT, DATA))
         srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
