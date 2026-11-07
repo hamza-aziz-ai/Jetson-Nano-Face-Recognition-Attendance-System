@@ -58,7 +58,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 📋 **Attendance** | Per-day event log with first and last seen, sightings, match score and a face snapshot; CSV export |
 | 🎞️ **Video upload** | Recognition on a recorded video (H.264/H.265, up to 1080p and 30 min): annotated copy to download with the names found; live cameras always go first; never counted as attendance; deleted after 7 days |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
-| 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
+| 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR on the local network (refused from the internet, D-041) |
 | 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload, Users and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 👥 **Users** | Admins and viewers added by email or phone number; viewers see everything and change nothing (e.g. family); single-use set-password links, no email or SMS needed |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
@@ -203,7 +203,7 @@ Optional: a Cloudflare Tunnel publishes the website at a hostname over HTTPS wit
 ## Security and privacy
 
 - Biometric data (photos, embeddings, snapshots, recordings) stays on the device.
-- The dashboard and the RTSP stream each need a login; passwords are stored as PBKDF2 hashes (RTSP needs its password in a mode-0600 file).
+- The dashboard and the RTSP stream each need a login; passwords are stored as PBKDF2 hashes (RTSP needs its password in a mode-0600 file). RTSP serves the local network only (D-041).
 - The dashboard uses plain HTTP: run it on a trusted network or behind a TLS reverse proxy.
 - `web_auth`, `rtsp_auth`, `facepipe.env`, `data/`, `gallery/` and `logs/` are git-ignored, and CI fails on secrets, private IPs, personal paths and biometric files.
 - Threat model: [docs/THREAT.md](docs/THREAT.md). Data inventory and retention: [docs/DATA.md](docs/DATA.md).
@@ -272,7 +272,7 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | CSI camera input | ✅ Raspberry Pi HQ Camera (IMX477, R8 removed), 15 fps with all outputs, recognized at cosine 0.62-0.69 |
 | Attendance log, dashboard, CSV, login | ✅ Verified |
 | Event clips and full-frame evidence | ✅ About 8 s clips with 3 s before the event, and 1080p evidence with the name drawn |
-| RTSP stream | ✅ Plays in VLC with the RTSP login |
+| RTSP stream | ✅ Plays in VLC with the RTSP login; since v1.10.1 local network only (DESCRIBE from the home network: 200 OK; from mobile data not yet tested) |
 | Adaptive detection | ✅ Same boxes and embeddings as before on identical frames (cosine 1.0000); 15 fps empty and occupied |
 | Clean shutdown, watchdog, daily logs | ✅ Verified |
 | Automatic update with health check | ✅ v1.1.1 deployed itself, healthy after 22 s |

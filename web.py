@@ -369,9 +369,10 @@ def page_overview():
     return layout("overview", "Overview", body, refresh=True)
 
 
-def page_live(host):
-    rtsp = ("<p class='body muted'>Also as a video stream for VLC or an NVR: <code>rtsp://%s:%s/live</code> (separate RTSP login).</p>"
-            % (esc(host), RTSP_PORT)) if os.path.exists(RTSP_AUTH) else ""
+def page_live(host, lan):
+    """lan: the visitor is on the local network; only then is the RTSP address shown (facepipe refuses others, D-041)"""
+    rtsp = ("<p class='body muted'>On the local network also as a video stream for VLC or an NVR: <code>rtsp://%s:%s/live</code> "
+            "(separate RTSP login; refused from the internet).</p>" % (esc(host), RTSP_PORT)) if lan and os.path.exists(RTSP_AUTH) else ""
     body = """<h1>Live</h1><p class="sub">The camera with recognition overlay: amber while recognizing, green with the name, red for unknown.</p>
 <section aria-labelledby="h-live"><div class="sh"><h2 id="h-live">Camera</h2><span class="count">annotated on the device</span>
  <span class="end"><button class="btn" id="livebtn" type="button">Pause</button></span></div>
@@ -1904,6 +1905,20 @@ def page_setup(t, ok, error=""):
     return public_page("Set your password", body, "login", "Account", "Recognition runs on this device; nothing leaves it.")
 
 
+def lan_address(ip):
+    """private, link-local or loopback: the local network (D-041; the same rule facepipe applies to RTSP viewers)"""
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    if a.version == 4 and a in ipaddress.ip_network("100.64.0.0/10"):  # carrier-grade NAT: the ISP's network, not ours
+        return False
+    return a.is_private or a.is_link_local or a.is_loopback
+
+
 # ---------- server ----------
 MAX_BODY = 4096       # forms here are tiny
 MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
@@ -1931,6 +1946,12 @@ class Handler(BaseHTTPRequestHandler):
         if ip in ("127.0.0.1", "::1") and cf and len(cf) <= 45 and re.match(r"^[0-9A-Fa-f:.]+$", cf):
             return cf
         return ip
+
+    def on_lan(self):
+        """a visitor on the local network, not through the Cloudflare Tunnel (D-041)"""
+        if self.headers.get("CF-Connecting-IP") and self.client_address[0] in ("127.0.0.1", "::1"):
+            return False
+        return lan_address(self.client_address[0])
 
     def https(self):
         """the visitor used HTTPS: only the Cloudflare Tunnel (cloudflared on this host) says so, in X-Forwarded-Proto;
@@ -2174,7 +2195,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/":
             return self.html_page(page_overview())
         if url.path == "/live":
-            return self.html_page(page_live((self.headers.get("Host") or "this-device").rsplit(":", 1)[0]))
+            return self.html_page(page_live((self.headers.get("Host") or "this-device").rsplit(":", 1)[0], self.on_lan()))
         if url.path in ("/attendance", "/csv"):
             today = datetime.date.today().isoformat()
             day = q.get("date", [today])[0]
@@ -2609,6 +2630,9 @@ def selftest_http():
     good = selftest_login(srv, get, host)
     assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 404
     assert get("/static/favicon.svg", auth=None)[1]["Content-Type"] == "image/svg+xml"
+    assert all(lan_address(a) for a in ("192" ".168.0.9", "10" ".1.2.3", "172" ".16.0.1", "127.0.0.1", "fe80::1", "fd00::3",
+                                        "::ffff:192" ".168.0.9"))  # private examples in two pieces: ci/scan.sh
+    assert not any(lan_address(a) for a in ("8.8.8.8", "100.64.0.1", "2401:4900::1", "::ffff:8.8.8.8", "x"))
     code, hd, body = get("/no-such-page", auth=None)
     assert code == 404 and b"Page not found" in body and "script-src 'self'" in hd["Content-Security-Policy"]
     assert get("/no-such-page")[0] == 404 and get("/rec/2026-11-06/000000_clip.mp4", auth=None)[0] == 401

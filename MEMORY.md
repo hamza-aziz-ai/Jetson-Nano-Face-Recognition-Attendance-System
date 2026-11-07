@@ -4,7 +4,7 @@ Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "S
 
 ## Versions
 
-- `main`: v1.10.0 (user accounts, D-040; v1.9.0 two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
+- `main`: v1.10.1 (RTSP local network only, D-041; v1.10.0 user accounts, D-040; v1.9.0 two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
 - Camera in use: the owner's phone over RTSP (chosen on the Cameras page); face matching L2 <= 0.90 (System page).
 
 ## Device
