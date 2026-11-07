@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-11-07
+
+### Fixed
+
+- The health warning judged every temperature sensor against one pair of limits (80 °C and 90 °C), which suit the CPU. `AO-therm`, the chip's always-on domain, runs several degrees hotter by design and is not critical until 110 °C, so it was almost always the hottest reading and the page warned about `AO is at 85 °C` while nothing was wrong. Each sensor now has its own limits, taken from the board's trip points, and both the warning and the colour of each row follow them. When more than one sensor is over its limit, the message names the one that is worst against its own, not the hottest number on the panel.
+
 ## [1.13.2] - 2026-11-07
 
 ### Changed

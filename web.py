@@ -533,7 +533,17 @@ def page_system(csrf, flash, read_only=False):
 # ---------- device health (owner: "temperature, fan, memory, CPU/GPU load, so I can shut the service remotely") ----------
 # Read from /sys and /proc without privileges. Jetson Nano paths; on other boards missing values are left out.
 WARN_C, HOT_C = 80, 90            # the Nano throttles near 97 C and shuts down a few degrees above
+# Each sensor has its own limits, read from the board's trip points: CPU-therm throttles at 97 C and is critical at
+# 102 C, while AO-therm, the chip's always-on domain (real-time clock, wake and power management; it stays powered when
+# the rest sleeps), runs several degrees hotter by design and is not critical until 110 C. One pair of numbers for all
+# of them makes AO the hottest reading almost always, so the warning named AO at 85 C while nothing was wrong.
+ZONE_C = {"AO": (95, 105), "PMIC-Die": (90, 100)}
 LOW_MEM_MB = 400
+
+
+def zone_c(name):
+    """(warn, hot) for a sensor; the CPU's numbers suit the ones that drive throttling"""
+    return ZONE_C.get(name, (WARN_C, HOT_C))
 _cpu_prev = {}
 
 
@@ -590,19 +600,22 @@ def device_health():
     h["fan"] = None if pwm is None else {"pct": round(100.0 * pwm / 255), "rpm": _read("/sys/devices/pwm-fan/rpm_measured", int)}
     up = _read("/proc/uptime")
     h["uptime_h"] = round(float(up.split()[0]) / 3600, 1) if up else None
-    hottest = max(h["temps"].values()) if h["temps"] else 0
-    h["level"] = "bad" if hottest >= HOT_C else "warn" if hottest >= WARN_C or (h["mem"]["available"] or 1e9) < LOW_MEM_MB else "ok"
+    # each sensor against its own limits, not one number against the hottest of them
+    levels = ["bad" if v >= zone_c(k)[1] else "warn" if v >= zone_c(k)[0] else "ok" for k, v in h["temps"].items()]
+    h["level"] = ("bad" if "bad" in levels else
+                  "warn" if "warn" in levels or (h["mem"]["available"] or 1e9) < LOW_MEM_MB else "ok")
     return h
 
 
 def health_html(h):
     """the Device health panel; app.js refreshes the same markup from /api/health every 5 s"""
-    def lvl_t(c):
-        return "bad" if c >= HOT_C else "warn" if c >= WARN_C else "ok"
+    def lvl_t(name, c):
+        warn, hot = zone_c(name)
+        return "bad" if c >= hot else "warn" if c >= warn else "ok"
 
     def meter(pct, lvl):
         return "<span class='bar %s'><i class='w%d'></i></span>" % (lvl, max(0, min(100, int(round(pct / 5.0) * 5))))
-    temps = "".join("<div class='hrow'><span>%s</span><b class='%s-text'>%.0f &deg;C</b></div>" % (esc(k), lvl_t(v), v)
+    temps = "".join("<div class='hrow'><span>%s</span><b class='%s-text'>%.0f &deg;C</b></div>" % (esc(k), lvl_t(k, v), v)
                     for k, v in sorted(h["temps"].items(), key=lambda kv: -kv[1]))
     cpu = "".join("<div class='hrow'><span>Core %d</span>%s<b>%d%%</b></div>" % (i, meter(v, "ok" if v < 85 else "warn"), v)
                   for i, v in enumerate(h["cpu"]))
@@ -613,23 +626,28 @@ def health_html(h):
     fan_txt = ("%d%% power%s" % (fan["pct"], ", %d rpm" % fan["rpm"] if fan.get("rpm") else " (no speed sensor)")) if fan else "no fan control"
     # name the reason: heat and low memory need different answers from whoever reads this, and on a device running only
     # this software low memory is the rare one, so "warm or short of memory" sent the reader looking in the wrong place
-    hot_name, hot_c = max(h["temps"].items(), key=lambda kv: kv[1]) if h["temps"] else ("", 0)
-    heat = "%s is at %.0f &deg;C" % (esc(hot_name), hot_c)
+    def worst(i):  # the hottest sensor that is at or over its own warn (i=0) or hot (i=1) limit, and that limit
+        zs = [(v, k) for k, v in h["temps"].items() if v >= zone_c(k)[i]]
+        if not zs:
+            return "", 0
+        c, name = max(zs)
+        return "%s is at %.0f &deg;C" % (esc(name), c), zone_c(name)[1]
     # same test as device_health(): a machine that reports no figure is never called short of memory
     low_mem = m["available"] is not None and m["total"] and m["available"] < LOW_MEM_MB
     short = "%d MB of %d MB free" % (m["available"], m["total"]) if low_mem else ""
     if h["level"] == "bad":
         banner = ("<div class='flash bad'>Too hot: %s. The Nano is slowing itself down to cool off. Check the fan and that "
-                  "air can move around the case; stop recognition on this page if it stays like this.</div>" % heat)
+                  "air can move around the case; stop recognition on this page if it stays like this.</div>" % worst(1)[0])
     elif h["level"] == "warn":
-        if hot_c >= WARN_C and low_mem:
+        heat, limit = worst(0)
+        if heat and low_mem:
             why = "running hot (%s) and low on memory (%s)" % (heat, short)
-        elif hot_c >= WARN_C:
+        elif heat:
             why = "running hot: %s" % heat
         else:
             why = "low on memory: %s" % short
         banner = ("<div class='flash warn'>The device is %s. Recognition keeps working; %s</div>"
-                  % (why, "check the fan and airflow before it reaches %d &deg;C." % HOT_C if hot_c >= WARN_C
+                  % (why, "check the fan and airflow before it reaches %d &deg;C." % limit if heat
                      else "restarting the services on this page frees memory if it stays low."))
     else:
         banner = ""
@@ -2703,14 +2721,19 @@ def selftest_checks():
     # the banner must name which of the two is wrong, on any machine: these do not depend on real sensors
     def banner_for(temps, avail):
         fake = dict(h, temps=temps, mem=dict(h["mem"], total=3963, available=avail))
-        hottest = max(temps.values()) if temps else 0
-        fake["level"] = "bad" if hottest >= HOT_C else "warn" if hottest >= WARN_C or avail < LOW_MEM_MB else "ok"
+        levels = ["bad" if v >= zone_c(k)[1] else "warn" if v >= zone_c(k)[0] else "ok" for k, v in temps.items()]
+        fake["level"] = "bad" if "bad" in levels else "warn" if "warn" in levels or avail < LOW_MEM_MB else "ok"
         return health_html(fake).split("</div>")[0]
     assert "running hot: CPU is at 85" in banner_for({"CPU": 85.0}, 2000), banner_for({"CPU": 85.0}, 2000)
     assert "low on memory: 200 MB of 3963 MB free" in banner_for({"CPU": 50.0}, 200)
     assert "running hot" in banner_for({"CPU": 85.0}, 200) and "low on memory" in banner_for({"CPU": 85.0}, 200)
     assert "Too hot: CPU is at 92" in banner_for({"CPU": 92.0}, 2000)
     assert "flash" not in banner_for({"CPU": 50.0}, 2000)
+    # each sensor against its own limits: AO runs hotter by design (critical at 110 C), so 87 C there is not a warning,
+    # and when the CPU is the one over its limit the message must name the CPU, not the hotter AO beside it
+    assert "flash" not in banner_for({"AO": 87.0, "CPU": 70.0, "PMIC-Die": 50.0}, 2000)
+    assert "running hot: CPU is at 81" in banner_for({"AO": 87.0, "CPU": 81.0}, 2000)
+    assert "before it reaches 105" in banner_for({"AO": 96.0}, 2000) and "AO is at 96" in banner_for({"AO": 96.0}, 2000)
     selftest_http()
     print("selftest ok")
 
