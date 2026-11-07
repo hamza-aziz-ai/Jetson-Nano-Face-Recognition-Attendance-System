@@ -121,7 +121,7 @@ v1.4.0 checks on the Nano (2026-11-07):
 | Cameras self-test | `python3 web.py --selftest` | ok: add with login (0600 file, password not on the page), enable, disable, bad address, "enable one first", remove |
 | Camera from the file | test instance with `FACEPIPE_CAMERAS` and no camera argument | file source: "camera chosen on the website, 1920x1080"; USB: 1280x720, 9.4 fps |
 | RTSP test button | `probe_rtsp` | phone stream: `H.264 (High Profile)`; no camera at the address: "the stream could not be opened" |
-| USB list | `video_devices()` | `/dev/video1 UVC Camera (046d:0825)`; CSI sensor (vi-output) left out |
+| USB list | `video_devices()` | `/dev/v4l/by-id/usb-046d_0825_<serial>-video-index0 UVC Camera (046d:0825)` (seen 2026-11-07); CSI sensor (vi-output) left out |
 
 v1.5.0 check (2026-11-07):
 
