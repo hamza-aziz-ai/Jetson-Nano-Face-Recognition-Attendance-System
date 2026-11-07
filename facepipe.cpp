@@ -4,8 +4,9 @@
 //               adds face objects, landmarks packed in misc_obj_info; every frame while faces are around, every
 //               FACEPIPE_IDLE_STEP-th after FACEPIPE_IDLE_AFTER s without one]
 //           -> nvtracker -> [probe: per track, Umeyama align 112x112, queue] -> fakesink.
-//         A worker runs w600k_r50, matches the gallery (cosine, like CCTV COSINE_THRESHOLD) and appends one event per
-//         track to $FACEPIPE_DATA/events-YYYY-MM-DD.jsonl with a face snapshot. Unknown tracks are retried a few times.
+//         A worker runs w600k_r50, matches the gallery (cosine, like CCTV COSINE_THRESHOLD) and appends an event to
+//         $FACEPIPE_DATA/events-YYYY-MM-DD.jsonl with a face snapshot, at most once per person per 5 minutes (D-038).
+//         Unknown tracks are retried a few times.
 // Video:  tracker -> nvdsosd (boxes + names) -> tee: NVJPG 1080p JPEG (live web view, event evidence image) and
 //         NVENC H.264 (RTSP rtsp://<nano>:8554/live with login; event clips 3 s before to 5 s after, in $FACEPIPE_REC).
 // Sources: rtsp:// file:// http:// (NVDEC), csi:<sensor-id> (Argus/ISP), usb:/dev/videoN (MJPEG on NVJPG, or raw).
@@ -687,6 +688,39 @@ static void log_event(guint64 track, const std::string &name, float score, float
   fclose(f);
 }
 
+// ---- repeat rule (D-038), the CCTV system's SAME_CAM_TIME_ENTRY_THRESHOLD: a person logged in the last REPEAT_S is
+// not logged again (no event, snapshot, frame or clip), so someone who stays in view is logged once every REPEAT_S, not
+// once per tracker id. Unknown faces have no name: one repeats an unknown logged in the window whose face it would match
+// under the active metric. Seeded from today's events file at start, so a restart or camera reconnect does not log
+// everyone again (unknowns are not: the file keeps no embeddings). Worker thread only.
+static const double REPEAT_S = 300;
+struct Logged { std::string name; double ts; std::vector<float> emb; };
+static std::deque<Logged> logged;
+static bool repeat(const std::string &name, const std::vector<float> &e, double now) {
+  while (!logged.empty() && now - logged.front().ts >= REPEAT_S) logged.pop_front();
+  for (auto &r : logged) {
+    if (r.name != name) continue;
+    if (name != "unknown") return true;
+    float s = 0;
+    for (int k = 0; k < 512; k++) s += e[k] * r.emb[k];
+    if (passes(s)) return true;
+  }
+  logged.push_back({name, now, name == "unknown" ? e : std::vector<float>()});
+  return false;
+}
+static void seed_repeats() {
+  std::string day, hms;
+  stamp(day, hms);
+  std::ifstream f(DATA_DIR + "/events-" + day + ".jsonl");
+  std::string line;
+  while (std::getline(f, line)) {
+    size_t t = line.find("\"ts\":"), n = line.find("\"name\":\"");
+    if (t == std::string::npos || n == std::string::npos) continue;
+    std::string name = line.substr(n + 8, line.find('"', n + 8) - n - 8);
+    if (name != "unknown") logged.push_back({name, std::atof(line.c_str() + t + 5), {}});
+  }
+}
+
 // ---- per-track state, shared by the tracker probe (producer) and the worker ----
 static GstClockTime last_label_pts = 0;  // PTS of the last frame labelled (guarded by st_mu)
 struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false; std::string name; float score = 0; };
@@ -700,7 +734,7 @@ static std::deque<Job> q_jobs;
 static std::atomic<bool> q_stop{false};
 static FILE *json_out = stdout;  // real stdout; fd 1 is pointed at stderr so DeepStream's own prints don't mix in
 static const size_t Q_MAX = 32;  // drop jobs if the GPU falls behind instead of growing memory
-static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0};
+static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0}, n_repeats{0};
 
 // Watchdog thread, always running. (1) No frame for FACEPIPE_WATCHDOG seconds (default 60, 0 = off): exit 3 so systemd
 // restarts us. A thread, not a GLib timer: the CSI stall of 2026-11-06 happened before the main loop ran, and a stalled
@@ -734,6 +768,7 @@ static void rec_worker() {
   Engine rec;
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   Gallery gal;
+  seed_repeats();
   while (true) {
     Job j;
     {
@@ -762,7 +797,9 @@ static void rec_worker() {
       tries = s.tries;
       if (known || s.tries >= MAX_TRIES) { s.done = true; s.name = m.first; s.score = m.second; }  // label shows from now
     }
-    if (known || tries >= MAX_TRIES) {
+    double now = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+    if ((known || tries >= MAX_TRIES) && repeat(m.first, e, now)) n_repeats++;
+    else if (known || tries >= MAX_TRIES) {
       std::string c = clip_trigger();       // clip starts CLIP_PRE before now
       std::string fr = save_evidence(j.track, decided_after);  // first frame labelled after the decision
       log_event(j.track, m.first, m.second, j.box[4], j.face, fr, c);
@@ -1012,8 +1049,8 @@ static gboolean report(gpointer) {
   last_det = n_detects;
   static int calls = 0;
   if (calls++ % 12 == 0)  // one log line a minute; status.json every 5 s
-    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld", fps, dps, f, (long)n_faces,
-         (long)n_known, (long)n_unknown, (long)n_dropped);
+    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld repeats %ld", fps, dps, f,
+         (long)n_faces, (long)n_known, (long)n_unknown, (long)n_dropped, (long)n_repeats);
   last = f; t = now;
   // status.json for the web page (written to a temp file, then renamed so readers never see half a file)
   std::string tmp = DATA_DIR + "/status.json.tmp";
@@ -1249,6 +1286,14 @@ static int selftest() {
   q[0] = 0.5f; q[1] = std::sqrt(0.75f);  // cosine 0.866 with b, 0.5 with a
   assert(g.match(q).first == "b");
   assert(Gallery().match(q).first == "unknown");
+  {  // repeat rule (D-038): a name once per REPEAT_S; an unknown repeats only an unknown it would match
+    std::vector<float> u(512, 0.f), v(512, 0.f);
+    u[0] = 1.f; v[1] = 1.f;
+    METRIC_L2 = false;
+    assert(!repeat("a", u, 1000) && repeat("a", v, 1299) && !repeat("b", u, 1299) && !repeat("a", u, 1300));
+    assert(!repeat("unknown", u, 2000) && repeat("unknown", u, 2100) && !repeat("unknown", v, 2100));
+    logged.clear();
+  }
   METRIC_L2 = m; MATCH = c; L2_MATCH = l;
   struct tm t = {};  // Friday 6 November 2026, 21:41:07
   t.tm_year = 126; t.tm_mon = 10; t.tm_mday = 6; t.tm_hour = 21; t.tm_min = 41; t.tm_sec = 7; t.tm_wday = 5;

@@ -376,3 +376,15 @@ Chosen: 3 (owner asked for a custom maintenance page "shown when tunnel is broke
 Why: when the tunnel or the Nano is down, the request never reaches the device, so the page must live at Cloudflare. A Worker is code in the repository and works on the free plan; it runs only on page addresses so the status polls (every 5-10 s per open page), files and clips do not count against the 100,000 requests a day.
 Trade-off: Pages now pass through a Worker (about 1 ms); if the daily limit were ever reached, those page requests would fail until the next day (remove with `npx wrangler delete --name facepipe-maintenance`). Status polls and the live stream still get Cloudflare's error while the device is down; the open page then says it cannot reach the device.
 Revisit if: traffic grows near the free limit, or a plan with custom error pages is bought.
+
+## D-038: Log a person at most once per 5 minutes (owner, same rule as the CCTV system)
+Options:
+
+1. One event per tracker id (before: the IOU tracker loses a face on a head turn, so one visit gave several events seconds apart)
+2. The CCTV system's rule: skip a record when the same person has one in the 5 minutes before it (`SAME_CAM_TIME_ENTRY_THRESHOLD`, `insert_recognition_data`)
+3. Merge repeats in the website only
+
+Chosen: 2 (owner: "there is a 5-minute rule, apply same here"). `repeat` in `facepipe.cpp`: a name logged in the last 300 s writes nothing; someone who stays in view is logged once every 5 minutes. Unknown faces have no name, so one counts as a repeat of an unknown logged in the window whose embedding it would match under the active metric (the CCTV system saves no unknowns). The window is rebuilt from today's events file at start; unknowns are not (the file keeps no embeddings). The key is the name alone while there is one camera; with two cameras it becomes name and camera, as in the CCTV system.
+Why: the dashboard and the disk filled with copies of one visit; 3 rejects it at the source too late (snapshots and clips already written).
+Trade-off: a second visit within 5 minutes is not logged; the first event's time and score stand, not the best one.
+Revisit if: attendance needs exact entry and exit times.
