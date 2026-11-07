@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.4] - 2026-11-07
+
+### Fixed
+
+- The health warning started at 80 °C, which is where this board sits while recognition is simply running, so it was lit through normal operation. It now starts at 90 °C and turns serious at 95 °C, leaving 7 °C of warning before the CPU throttles itself at 97 °C. Measured on the Nano: recognition settles at about 81 °C on the CPU and 87 °C on the always-on domain, and the panel now says nothing about that.
+
 ## [1.13.3] - 2026-11-07
 
 ### Fixed
