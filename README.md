@@ -146,7 +146,7 @@ flowchart TB
 3. **Gate.** `main` is protected by the five checks. CI has caught real bugs this way, for example an enrollment file leak and crash ([write-up](docs/bugs/enroll-leak-and-crash.md)).
 4. **Merge.** Pull requests merge themselves (squash) once every check passes.
 5. **Release.** A merged change that raises `VERSION` makes the release workflow run CI again, tag `vX.Y.Z` on that commit and publish the GitHub Release with the CHANGELOG section. Nobody tags by hand (D-023, D-032).
-6. **Delivery.** A systemd timer on the Nano checks the release list every 10 minutes and needs no inbound access (D-031). The repository is private, so the device reads it with a read-only token in `gh_token` (D-044).
+6. **Delivery.** A systemd timer on the Nano checks the release list every 10 minutes and needs no inbound access (D-031). While the repository is private the device reads that list with a read-only token in `gh_token` (D-044); public, it needs nothing.
 7. **Deploy.** `deploy/deploy.sh` builds the tag on the Nano with `make all` (linking against the JetPack libraries on the device), runs the self-tests, installs over the app folder while keeping configuration, data and models, and restarts the services.
 8. **On the device.** `facepipe` (pipeline) and `facepipe-web` (dashboard) run under systemd, restart on failure and reconnect to the camera.
 9. **Rollback.** Healthy means the new process itself (its systemd `MainPID`) reports advancing frames; otherwise the previous version is restored and the release is not retried (D-029).
@@ -255,7 +255,7 @@ All settings are environment variables in `facepipe.env`; `facepipe.env.example`
 | `FACEPIPE_LOGS` | `logs/` in the app folder | log folder |
 | `FACEPIPE_USB_FORMAT` | `mjpeg` | `mjpeg` or `raw` for USB cameras |
 | `FACEPIPE_CAM_FPS` | `30` | capture rate for CSI and USB cameras |
-| `FACEPIPE_REPO` | this repository | GitHub repository the update timer follows (private: needs `gh_token`, D-044) |
+| `FACEPIPE_REPO` | this repository | GitHub repository the update timer follows (needs `gh_token` while it is private, D-044) |
 
 A custom OpenCV build (for example with CUDA) instead of the system one: `make all OPENCV_PC=<its lib/pkgconfig>`.
 
