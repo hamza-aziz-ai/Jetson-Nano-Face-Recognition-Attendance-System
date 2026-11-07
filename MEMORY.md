@@ -28,9 +28,10 @@ Snapshot: **2026-11-07 11:55 PM IST**. Volatile state; verify before acting (see
 
 1. **Power:** a 5 V 4 A barrel supply with the J48 jumper is ordered, expected by **10 November 2026**. It fixes the `OC ALARM` entries and the clock drops, not the temperature. The final two-camera numbers (D-039) wait for it.
 2. **Two cameras:** reconnect test, switching the phone stream off and on.
-3. **GitHub:** revoke the SSH key `SHA256:liIG…6M0` ("Hamza-Jetson-Nano") and the `gh` OAuth token with `repo` and `admin:public_key`; deleting them from the device did not revoke them.
-4. **Confirm** the fine-grained token is Contents: Read-only, and upload the social preview PNG (Settings, Social preview).
-5. **RTSP from mobile data:** expect 403 (D-041); still untested.
+3. **Confirm** the fine-grained token is Contents: Read-only, and upload the social preview PNG (Settings, Social preview).
+4. **RTSP from mobile data:** expect 403 (D-041); still untested.
+
+Done on 2026-11-08: the SSH key `SHA256:liIG…6M0` ("Hamza-Jetson-Nano") and the `gh` OAuth token were revoked on GitHub; `gh ssh-key list` now shows only the laptop key.
 
 ## Still open
 
