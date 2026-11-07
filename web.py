@@ -191,10 +191,17 @@ def attendance(events):
 
 
 def match_text(e):
-    """the number of the rule that decided: "L2 0.62" (distance, 0 to 2, lower is closer) or "0.78" (cosine, -1 to 1)"""
+    """the number of the rule that decided, always named: "L2 0.62" (distance, 0 to 2, lower is closer) or "Cosine 0.78"
+    (similarity, -1 to 1, higher is closer); events before the metric field are cosine"""
     if e.get("metric") == "l2" and "l2" in e:
         return "L2 %.2f" % e["l2"]
-    return "%.2f" % e["score"]
+    return "Cosine %.2f" % e["score"]
+
+
+def rule_text():
+    """the rule in use now, for the column headings: "L2 ≤ 0.90" or "Cosine ≥ 0.50" """
+    m = matching()
+    return "L2 ≤ %.2f" % m["l2"] if m["metric"] == "l2" else "Cosine ≥ %.2f" % m["cosine"]
 
 
 def enrolled():
@@ -360,8 +367,8 @@ def page_overview():
         % (face(e, gal), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
            "<div class='m muted'>%s</div>" % esc(e["camera_name"]) if e.get("camera_name") else "",
            match_text(e), evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
-    act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match</th>"
-           "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % rows) if rows else \
+    act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match <small class='muted'>(%s)</small></th>"
+           "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % (esc(rule_text()), rows)) if rows else \
         "<p class='empty'>No faces seen yet today.</p>"
     svc = ("<div class='card'><div class='k'>Recognition</div><div class='v'><span class='pill %s'>%s</span></div>"
            "<div class='s'>%s</div></div>" % (st["state"], {"live": "Running", "no_video": "No video", "stopped": "Stopped"}[st["state"]],
@@ -409,8 +416,8 @@ def page_attendance(day, today):
     present = (
         "<table data-sort><thead><tr><th data-k scope='col'><button>Name</button></th><th data-k scope='col'><button>First seen</button></th>"
         "<th data-k scope='col'><button>Last seen</button></th><th data-k scope='col'><button>Sightings</button></th>"
-        "<th data-k scope='col'><button>Best match</button></th><th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>"
-        % "".join(rows)) if rows else "<p class='empty'>No one recognized %s.</p>" % ("yet today" if is_today else "on this day")
+        "<th data-k scope='col'><button>Best match <small class='muted'>(%s)</small></button></th><th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>"
+        % (esc(rule_text()), "".join(rows))) if rows else "<p class='empty'>No one recognized %s.</p>" % ("yet today" if is_today else "on this day")
     absent_html = ("<div class='chips'>%s</div>" % "".join(
         "<span class='chip' data-name='%s'>%s%s</span>" % (esc(display_name(n).lower()), avatar(n, gal), esc(display_name(n)))
         for n in absent)) if absent else "<p class='empty'>%s</p>" % ("Everyone enrolled is present." if gal else "No one is enrolled yet.")
@@ -2627,8 +2634,9 @@ def selftest_checks():
         shutil.rmtree(root)
     assert p["sightings"] == 2 and p["best"] == 0.7 and p["snap"] == "s1", p
     # the shown number follows the rule that decided (owner: "-0.04" under L2 looked wrong)
-    assert match_text({"score": -0.035, "metric": "l2", "l2": 1.439}) == "L2 1.44" and match_text({"score": 0.78}) == "0.78"
-    assert match_text({"score": 0.6, "metric": "cosine", "l2": 0.89}) == "0.60" and match_text(p["best_e"]) == "0.70"
+    assert match_text({"score": -0.035, "metric": "l2", "l2": 1.439}) == "L2 1.44" and match_text({"score": 0.78}) == "Cosine 0.78"
+    assert match_text({"score": 0.6, "metric": "cosine", "l2": 0.89}) == "Cosine 0.60" and match_text(p["best_e"]) == "Cosine 0.70"
+    assert rule_text().startswith(("L2 ≤ ", "Cosine ≥ "))
     assert len(unknown) == 1 and display_name("a_b") == "A B"
     assert SNAP_RE.match("2026-11-06/090000_3.jpg") and not SNAP_RE.match("../web_auth")
     assert not DATE_RE.match("2026-11-06/../../x")

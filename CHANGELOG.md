@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.11.3] - 2026-11-07
+
+### Changed
+
+- Every match number names its rule, `L2 0.87` or `Cosine 0.78`, and the Match and Best match headings name the rule in use, e.g. "Match (L2 ≤ 0.90)" (owner: "It should be clear on Webpage whether the match is using COSINE or L2").
+
 ## [1.11.2] - 2026-11-07
 
 ### Fixed
