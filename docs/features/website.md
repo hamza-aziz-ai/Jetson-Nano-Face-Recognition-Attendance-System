@@ -23,4 +23,4 @@ A banner on every page while recognition is stopped (red, with who stopped it an
 
 ## Match numbers (v1.11.2)
 
-The Match and Best match columns show the number of the rule that decided: `L2 0.87` (distance from 0 to 2, lower is closer; recognized at or below the L2 setting) or `0.78` (cosine from -1 to 1, higher is closer). The CSV says which in `match_rule`.
+The Match and Best match columns show the number of the rule that decided, always named: `L2 0.87` (distance from 0 to 2, lower is closer; recognized at or below the L2 setting) or `Cosine 0.78` (from -1 to 1, higher is closer). The column headings name the rule in use, e.g. `Match (L2 ≤ 0.90)`. The CSV says which in `match_rule`.

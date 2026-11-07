@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- Match numbers followed the cosine score even when face matching was set to L2 (owner: "-0.04" under L2 looked wrong). Overview, Attendance and the unknown-face list now show the number of the rule that decided, e.g. "L2 0.87" (distance, lower is closer) or "0.78" (cosine). The CSV has a new `match_rule` column (`l2` or `cosine`) before `best_match` (bugs/match-shown-as-cosine.md).
+- Match numbers followed the cosine score even when face matching was set to L2 (owner: "-0.04" under L2 looked wrong). Overview, Attendance and the unknown-face list now show the number of the rule that decided, always named, e.g. "L2 0.87" (distance, lower is closer) or "Cosine 0.78"; the Match and Best match headings name the rule in use, e.g. "(L2 ≤ 0.90)" (owner: it must be clear which one is used). The CSV has a new `match_rule` column (`l2` or `cosine`) before `best_match` (bugs/match-shown-as-cosine.md).
 
 ## [1.11.1] - 2026-11-07
 
