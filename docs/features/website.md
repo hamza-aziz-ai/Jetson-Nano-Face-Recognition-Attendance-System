@@ -16,3 +16,7 @@ Added 2026-11-06 at the owner's request ("Do not put everything in just one webp
 - **Messages:** the System page shows fixed messages chosen by a key in the URL; no request text is reflected into a page.
 
 Proof: `python3 web.py --selftest` starts a real server on a free port and checks login, all five pages with their CSP, HTML escaping of a hostile name, Range, and that a POST is refused without `Origin`, with a wrong token, from another site, with an unknown action and when too large. On the Nano, a second instance on port 8001 with the real data served all pages, and its Restart button restarted the live service through the sudoers rule (clean stop in 3 s, active again). See TEST-CHECKLIST.
+
+## Recognition state (v1.11.0, owner)
+
+A banner on every page while recognition is stopped (red, with who stopped it and when, from `data/service-last.json`), not running although it should be (red) or without a camera picture (amber), linking to the System page. The System page shows the state in large type. After confirming, the Start, Stop and Restart buttons read "Starting…", "Stopping…" or "Restarting…" until the page comes back.
