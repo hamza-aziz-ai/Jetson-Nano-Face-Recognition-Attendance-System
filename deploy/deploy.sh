@@ -14,13 +14,15 @@ VER=${TAG#v}
 WORK=$(mktemp -d)
 DIST=${DIST:-$WORK/dist}
 # shipped files; facepipe.env, web_auth, rtsp_auth, data/, gallery/, models/ and tracker.yml stay untouched
-FILES="facepipe facepipe-enroll web.py VERSION facepipe.env.example check_vs_rest.py deploy/update.sh web/layout.html web/public.html web/app.css web/app.js web/logo.svg"
+FILES="facepipe facepipe-enroll web.py webapp.so VERSION facepipe.env.example deploy/update.sh web/layout.html web/public.html web/app.css web/app.js web/logo.svg web/favicon.svg"
 
 echo "== build $TAG"
 git clone -q --depth 1 --branch "$TAG" "$REPO_URL" "$WORK/src"
 cd "$WORK/src"
 [ "$(cat VERSION)" = "$VER" ] || { echo "VERSION $(cat VERSION) does not match $TAG"; exit 1; }
 make all >/dev/null
+# web.py becomes webapp.so plus a two-line stub (D-043), before the tests, so they run against what ships
+sh deploy/compile-web.sh
 
 echo "== test"
 [ "$(./facepipe --version)" = "$VER" ] || { echo "binary reports $(./facepipe --version), expected $VER"; exit 1; }

@@ -1,6 +1,6 @@
 # Dependencies and secrets
 
-No dependency is downloaded at build or run time; everything comes with JetPack or is a file placed by hand.
+No dependency is downloaded during a build or at run time: everything comes with JetPack, is a file placed by hand, or is the one build tool installed once by hand (Nuitka, below).
 
 ## Platform (from JetPack 4.6.6)
 
@@ -14,6 +14,7 @@ No dependency is downloaded at build or run time; everything comes with JetPack 
 | L4T multimedia | 32.7.6 | nvv4l2decoder, nvv4l2h264enc, nvjpegenc, nvarguscamerasrc | NVIDIA |
 | OpenCV | 4.9.0 with CUDA (built from source on the device) | Alignment warp, SVD, image reading in enrollment | OpenCV project |
 | Python | 3.6.9 standard library | Web page | Python project via Ubuntu |
+| Nuitka | 4.3.4 (`pip3 install --user nuitka==4.3.4`, build time only) | Compiles `web.py` into `webapp.so`, so a deployed device carries no readable Python (D-043). `deploy/install.sh` refuses to install without it: an update would fail and that release would never be retried | Nuitka project via PyPI |
 
 ## Models (not in the repository)
 

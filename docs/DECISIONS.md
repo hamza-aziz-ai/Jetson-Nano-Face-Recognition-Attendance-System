@@ -440,3 +440,22 @@ Chosen, agreed with Codex in a council (3 exchanges). Model: Claude Opus 5.5 wit
 Rejected: never logging unknowns (the CCTV system's way; the owner wants strangers recorded); the residual alone as the pose test; detecting cut-off faces from black pixels; choosing the logged try by gallery similarity instead of clarity.
 Trade-off: a stranger who never faces the camera is not recorded; limits are unvalidated until calibrated; "unknown" means no gallery match, not a proven stranger.
 Revisit if: calibration shows the limits drop clear strangers or pass bad views.
+
+## D-043: Ship the website as compiled code, not as readable Python (owner)
+Owner, 2026-11-07, asked how to protect the source before installing the system at a client: "What if I need to deploy this at a client machine. Currently it uses bare Python files, right?"
+Options:
+
+1. Ship `web.py` as it is (today)
+2. Ship `.pyc` bytecode
+3. Compile `web.py` to a native module with Nuitka
+4. An obfuscator
+
+Chosen: 3. `deploy/compile-web.sh` runs Nuitka in module mode on every deploy (`deploy/deploy.sh`, before the self-tests), producing `webapp.so` (2.4 MB of machine code) and leaving a two-line `web.py` that imports it and calls `main()`. The repository keeps the full source; only the deployed tree and the release tarball are compiled. `web.py` grew a `main()` function so the stub has something to call. The owner chose this for every release, their own device included, so what runs here is what a client would get.
+
+Why: the recognition pipeline is already a C++ binary, so the website was the only readable part. Bytecode (2) is turned back into near-original source by any decompiler in seconds, which is not protection. An obfuscator (4) only slows a reader down and makes every traceback harder to read. Nuitka compiles to C and then to machine code, so there is no bytecode to recover; it supports Python 3.4-3.14, and the Nano's 3.6.9 is in range.
+
+Trade-off: the compile takes 5 m 40 s on the Nano and is added to every automatic deploy, and the device now needs Nuitka (`pip3 install --user nuitka==4.3.4`; `deploy/install.sh` refuses to install without it, because an update would otherwise fail and that release would never be retried). A traceback from the compiled build names the function and the line but cannot show the line's text. `check_vs_rest.py`, a 15-line developer tool for comparing embeddings against the CCTV system, was dropped from the shipped file list in the same change: it has no purpose on a device, and it was the only other Python there. What compiling does **not** hide: the deploy shell scripts, which stay readable because the device runs them; the text inside the program (page wording, HTML, log and error messages) and the names of functions and variables stay readable in `webapp.so`, as in any compiled program; `web/app.js` and `web/app.css` are sent to browsers and cannot be hidden at all; and anyone with root on the machine can still read the memory of a running process. This raises the cost of copying the logic, and does not make it impossible.
+
+Also needed before a client install, neither of them technical: the repository goes private (the owner is doing this), and the InsightFace models are licensed for non-commercial use only, so they must be replaced or licensed.
+
+Revisit if: the compile time becomes a problem for deploys, a client needs a build for a different Python or architecture, or the models' licence is settled and the terms change what has to be protected.

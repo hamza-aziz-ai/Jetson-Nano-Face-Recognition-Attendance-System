@@ -33,7 +33,7 @@ flowchart LR
 | --- | --- | --- |
 | `facepipe` | C++ DeepStream 6.0.1 application: capture, detection, tracking, recognition, event log, video outputs, RTSP server | systemd `facepipe.service`, as the user who ran `deploy/install.sh` |
 | `facepipe-enroll` | Same source built with `-DFACEPIPE_ENROLL`: photos to gallery | Run by hand |
-| `web.py`, `web/` | Python 3.6 standard-library website: Overview, Live, Attendance, People, System (service control); CSV, evidence files | systemd `facepipe-web.service` |
+| `web.py`, `web/` | Python 3.6 standard-library website: Overview, Live, Attendance, People, System (service control); CSV, evidence files. Deployed as `webapp.so` (compiled) with a two-line `web.py` that starts it, D-043 | systemd `facepipe-web.service` |
 | `models/` | SCRFD-10G (640x384) and ArcFace w600k_r50, ONNX plus TensorRT FP16 engines built on the device | Files |
 | `data/` | `gallery.tsv`, `events-YYYY-MM-DD.jsonl`, `snaps/`, `status.json` | Files |
 | `/mnt/rec` | 64 GB ext4 image-file volume for event clips and full-frame evidence | fstab loop mount |
