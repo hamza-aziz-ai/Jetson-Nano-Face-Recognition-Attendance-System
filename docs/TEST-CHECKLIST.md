@@ -137,7 +137,7 @@ v1.6.0 checks on the Nano (2026-11-07):
 | --- | --- | --- |
 | Device health readings | `device_health()` on the Nano | AO 77, CPU 71, GPU 69, PLL 70, PMIC 50 °C; cores 34/31/17/21 %; CPU 1224 MHz; GPU 0 % at 921 MHz; fan 63 % (no rpm sensor); 1440 of 3963 MB available; swap 406 MB used; level ok |
 | Health API and panel | `python3 web.py --selftest` | ok: 4 panel cards from `/api/health`, 401 without login |
-| Health warning names the reason | `python3 web.py --selftest` | ok: hot only, low memory only, both, too hot, and no banner when fine; checked with made-up readings so it runs on any machine (seen 2026-11-07 on the Nano) |
+| Health warning names the reason | `python3 web.py --selftest` | ok: hot only, low memory only, both, too hot, no banner when fine, AO at 87 °C is not a warning, CPU named over the hotter AO beside it, AO warning counts to 105 °C; made-up readings, so it runs on any machine (seen 2026-11-07 on the Nano) |
 
 v1.6.1 check on the Nano (2026-11-07):
 
