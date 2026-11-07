@@ -36,7 +36,10 @@ fi
 
 echo "== self-tests"
 ./facepipe --selftest
-FACEPIPE_DATA="$APP/data" python3 web.py --selftest
+# a throwaway data folder: the self-test writes and deletes camera files and test events
+T=$(mktemp -d)
+FACEPIPE_DATA="$T" python3 web.py --selftest
+rm -rf "$T"
 
 if [ ! -f facepipe.env ]; then
   cp facepipe.env.example facepipe.env

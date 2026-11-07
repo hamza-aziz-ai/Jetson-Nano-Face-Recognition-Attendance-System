@@ -388,3 +388,21 @@ Chosen: 2 (owner: "there is a 5-minute rule, apply same here"). `repeat` in `fac
 Why: the dashboard and the disk filled with copies of one visit; 3 rejects it at the source too late (snapshots and clips already written).
 Trade-off: a second visit within 5 minutes is not logged; the first event's time and score stand, not the best one.
 Revisit if: attendance needs exact entry and exit times.
+
+## D-039: Two cameras and video uploads in one process (council)
+Owner's request: two RTSP cameras at once and video upload, in one pull request. Owner's answers: the risk that a malformed video crashes recognition once (about 20 s restart) is accepted; uploads are kept 7 days.
+Measured first (2026-11-07): a second full facepipe on the same stream used 3.35-3.45 of 3.96 GB and cut the live instance from 14.6 to 8.8 fps, so D-033's "separate --job process" failed its capacity test and its fallback applies.
+Chosen, agreed with Codex in a council (6 exchanges). Model: Claude Opus 5.5 with Codex GPT-6.1 Sol (council).
+
+- One facepipe, shared SCRFD and ArcFace engines. Two cameras: one `nvurisrcbin` each (TCP, native `rtsp-reconnect-interval` 10 s) into one live nvstreammux (1280x720 canvas with padding, batch 2). Stable camera IDs from `cameras.json` in `cameras.active` ("<uri> <w> <h> <id> <name>"; old one-line files still read) and a per-camera generation raised after a 3 s gap.
+- Detection budget: at most one SCRFD run per batch; two cameras both due take turns (about 7.5 detections/s each). Crops before the tiler; `nvmultistreamtiler` 1 row x 2 columns at 1920x540, then OSD and the existing JPEG/H.264 outputs. A camera without frames for 3 s gets "<name>: offline" on its tile.
+- Stale results: every job carries camera, generation and track ID (uploads: job number); a result applies only if that track is still pending under the same key.
+- Evidence: a frame is saved only if its own batch was certified to show the decided label on a fresh frame of that camera (exact batch, checked as each JPEG arrives; the worker writes the file).
+- Repeat rule (D-038) per person per camera, as in the CCTV system; unknown faces stay logged (the CCTV system saves none).
+- Errors inside one camera's source are logged and left to nvurisrcbin; any other pipeline error still restarts the process. The watchdog needs both live camera frames and live output frames.
+- Uploads: a second pipeline in the same process, one job at a time, own tracker, OSD and encoder; every frame kept. The SCRFD transaction (fill, run, decode) is locked; an upload is admitted only while every live camera is idle and no live detection waits, checked again under the lock; live recognition jobs first. Never touches attendance, evidence, clips or the repeat rule.
+- Checked by `gst-discoverer-1.0` in a separate process before queueing (H.264/H.265, at most 1080p and 30 min); limits re-checked while decoding; 3 waiting, 4 GB cap, 2 GB free-space reserve enforced while files grow; cancel and delete; a job found `processing` at start is failed, never retried. Enrollment and uploads share an exclusive `flock` (`data/gpu-batch.lock`).
+
+Rejected: uploads as a third source of the live mux (couples timing, end of stream and outputs to the cameras); per-camera encoders through nvstreamdemux (more memory and NVENC sessions for 2 cameras); evidence by a render counter at OSD or by "the first frame after the decision" (both can pick a frame without the label); purging tracks instead of generation tokens (a result in flight would label a new track); a HOLD-file handshake for enrollment (the lock is atomic and released by the kernel if a holder dies).
+Trade-off: one shared process: a decoder crash on an uploaded file restarts live recognition once (owner accepted). Live view, clips and evidence show both cameras at half width. With faces at both cameras each gets about half the detection rate. Uploads wait as long as people are in view.
+Revisit if: a third camera is wanted, uploads must finish during busy hours, or a camera needs its own full-size clips.

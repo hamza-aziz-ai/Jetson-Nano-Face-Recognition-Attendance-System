@@ -27,6 +27,9 @@ The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG
 | Watchdog | `FACEPIPE_WATCHDOG=10 ./facepipe usb:/dev/video99 640 480` | `watchdog: no frames for 10 s, exiting` (seen 2026-11-06) |
 | Match rule | `./facepipe --selftest` | `selftest ok` (cosine and L2 thresholds, same closest photo for both) |
 | Version | `./facepipe --version` | the `VERSION` file's content; same in `data/status.json` and the dashboard footer |
+| Two cameras | two lines in `cameras.active`, run facepipe 2 min | `cameras chosen on the website: A and B`; status.json `cameras` both `up`, about 14.4 fps each (seen 2026-11-07 with two connections to one phone stream; 2.3 GB RAM in use) |
+| One camera broken at start | second line `rtsp://127.0.0.1:1/none` | first camera about 14.8 fps, second `up: false`, no exit (seen 2026-11-07) |
+| Video upload end to end | upload a short H.264 clip on the Video upload page | state `done`, download `<name>-recognized.mp4`; live fps unchanged (seen 2026-11-07: 9 s clip in 18 s, live USB camera 15 fps) |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |
 | Live run | `FACEPIPE_DIR=. timeout -s INT 60 ./facepipe <source> 1920 1080` | `[facepipe] fps` near 15 with `FACEPIPE_DROP=2` on a 30 fps camera; known faces counted |
 | Embeddings vs reference | `python -I check_vs_rest.py <photos> <dir with faces.jsonl>` | Matching photos at cosine 0.96 or more |

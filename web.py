@@ -214,7 +214,12 @@ def status():
     elif s.get("fps", 0) < 0.5:
         s.update(state="no_video", detail="Service running, waiting for the camera")
     else:
-        s.update(state="live", detail="Live, %.1f fps" % s["fps"])
+        cams = s.get("cameras") or []
+        if len(cams) > 1:  # two cameras: each one's own rate, or that it is offline
+            s.update(state="live", detail="Live: " + ", ".join(
+                "%s %.1f fps" % (c.get("name", "?"), c.get("fps", 0)) if c.get("up") else "%s offline" % c.get("name", "?") for c in cams))
+        else:
+            s.update(state="live", detail="Live, %.1f fps" % s["fps"])
     return s
 
 
@@ -245,9 +250,11 @@ ICONS = {  # 24x24 stroke icons for the sidebar (inline SVG: no files, no fonts)
     "attendance": "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 2v4M8 2v4M3 10h18M8 15l2.5 2.5L16 13",
     "people": "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
     "cameras": "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "uploads": "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
     "system": "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"}
 PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
-         ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("system", "/system", "System")]
+         ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("uploads", "/uploads", "Video upload"),
+         ("system", "/system", "System")]
 CSRF_MARK = "@@csrf@@"  # the layout's sign-out form; html_page puts the session's form token here
 CSP = ("default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -267,6 +274,8 @@ FLASH = {  # fixed messages only: the query string never reflects text into the 
     "match_saved_stopped": ("ok", "Face matching saved. Recognition is stopped; it applies when you start it."),
     "match_bad": ("bad", "Check the values: cosine 0.30 to 0.90, L2 0.50 to 1.20."),
     "cam_added": ("ok", "Camera added."), "cam_removed": ("ok", "Camera removed."), "cam_noprev": ("bad", "There is no earlier camera setup to restore."),
+    "cam_two": ("bad", "Two network cameras are enabled already; disable one first."),
+    "up_cancelled": ("ok", "Cancelled."), "up_deleted": ("ok", "Video deleted."),
     "cam_test_ok": ("ok", "The camera answered."), "cam_test_bad": ("bad", "The camera test failed; see the line under its name."), "denied": ("bad", "The request was refused (expired form or another site).")}
 esc = html.escape
 
@@ -327,8 +336,9 @@ def page_overview():
     st = status()
     recent = sorted(events, key=lambda e: e["ts"], reverse=True)[:8]
     rows = "".join(
-        "<tr><td><div class='who'>%s%s</div></td><td class='num'>%s</td><td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
+        "<tr><td><div class='who'>%s%s</div></td><td class='num'>%s%s</td><td class='num'>%.2f</td><td class='ev'>%s</td></tr>"
         % (face(e, gal), "Unknown" if e["name"] == "unknown" else esc(display_name(e["name"])), hms(e["time"]),
+           "<div class='m muted'>%s</div>" % esc(e["camera_name"]) if e.get("camera_name") else "",
            e["score"], evidence(e)) for e in recent if SNAP_RE.match(e.get("snap", "")))
     act = ("<table><thead><tr><th scope='col'>Who</th><th scope='col'>Time</th><th scope='col'>Match</th>"
            "<th scope='col'>Evidence</th></tr></thead><tbody>%s</tbody></table>" % rows) if rows else \
@@ -408,9 +418,13 @@ def page_attendance(day, today):
 def camera_label():
     """the camera facepipe uses, without credentials: data/cameras.active (chosen on the Cameras page) over facepipe.env"""
     try:
-        uri = open(CAM_ACTIVE, encoding="utf-8").read().split()[0]
+        lines = [l.split() for l in open(CAM_ACTIVE, encoding="utf-8").read().splitlines() if l.strip()]
+        uri = lines[0][0]
     except (OSError, IndexError):
-        uri = env_uri()
+        lines, uri = [], env_uri()
+    if len(lines) > 1:  # two network cameras (D-039)
+        names = {c["id"]: c["name"] for c in load_cameras()["rtsp"]}
+        return " and ".join(names.get(l[3] if len(l) > 3 else "", "network camera") for l in lines) + " (network cameras)"
     for c in load_cameras()["rtsp"] if RTSP_RE.match(uri) else []:
         if c["url"] == uri:
             return "%s (network camera at %s)" % (c["name"], urlparse(uri).hostname or "?")
@@ -898,11 +912,19 @@ def run_enroll(work):
     """enroll the staged gallery into work/gallery.tsv; returns an error text or None"""
     if mem_available_mb() < MIN_FREE_MB:
         return "not enough free memory to enroll now (%d MB); try again later" % mem_available_mb()
+    gl = open(GPU_LOCK, "a")  # D-039: never beside a video upload (both load TensorRT engines next to live recognition)
+    try:
+        fcntl.flock(gl, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        gl.close()
+        return "a video upload is being processed; approve again when it is done"
     try:
         r = subprocess.run([ENROLL_BIN, os.path.join(work, "gallery")], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            timeout=900, env=dict(os.environ, FACEPIPE_GALLERY=os.path.join(work, "gallery.tsv")))
     except (OSError, subprocess.SubprocessError) as e:
         return "enrollment could not run (%s)" % e.__class__.__name__
+    finally:
+        gl.close()  # releases the lock
     if r.returncode != 0:
         last = r.stderr.decode(errors="replace").strip().splitlines()
         return "enrollment failed: %s" % (last[-1] if last else "exit %d" % r.returncode)
@@ -1148,7 +1170,7 @@ def page_people(csrf, host, show="", flash=""):
 # "<uri> <width> <height>". The previous pair is kept as *.prev for Revert. The website never shows an RTSP password.
 CAM_JSON = os.path.join(DATA, "cameras.json")
 CAM_ACTIVE = os.path.join(DATA, "cameras.active")
-MAX_ACTIVE_RTSP = 1   # two at once comes with the next release
+MAX_ACTIVE_RTSP = 2   # D-039: two network cameras at once, in one pipeline
 SIZES = {"1920x1080": (1920, 1080), "1280x720": (1280, 720)}
 RTSP_RE = re.compile(r"^rtsps?://[^\s'\"<>\\]+$")
 CAM_NAME_RE = re.compile(r"^[^\x00-\x1f<>\"'`]{1,40}$")
@@ -1218,8 +1240,8 @@ def active_line(cfg):
         return "csi:%s %d %d" % (cfg["csi"], w, h)
     if cfg["source"] == "usb":
         return "usb:%s %d %d" % (cfg["usb"], w, h)
-    on = [c for c in cfg["rtsp"] if c.get("enabled")]
-    return "%s %d %d" % (on[0]["url"], w, h) if on else ""
+    on = [c for c in cfg["rtsp"] if c.get("enabled")][:MAX_ACTIVE_RTSP]
+    return "\n".join("%s %d %d %s %s" % (c["url"], w, h, c["id"], c["name"]) for c in on)
 
 
 def write_private(path, text):
@@ -1381,8 +1403,8 @@ def camera_post(path, form):
         if c.get("enabled"):
             c["enabled"] = False
         else:
-            for other in cfg["rtsp"]:  # one network camera at a time in this release: enabling one disables the others
-                other["enabled"] = False
+            if sum(1 for x in cfg["rtsp"] if x.get("enabled")) >= MAX_ACTIVE_RTSP:
+                return "cam_two", None
             c["enabled"] = True
         if cfg["source"] == "rtsp":
             return apply_cameras(cfg), None
@@ -1398,6 +1420,226 @@ def camera_post(path, form):
     return "denied", None
 
 
+
+# ---------- video uploads (D-039): facepipe processes them beside live recognition (live first); never attendance ----------
+# data/uploads/<id>/: input (written here as input.part, renamed when checked), meta.json, state (queued, processing, done,
+# failed, cancelled; set by facepipe after queued), reason, progress.json, result.mp4, result.json, cancel (a request).
+UPLOADS = os.path.join(DATA, "uploads")
+UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+UPLOAD_MAX_LAN = 500 * 1048576
+UPLOAD_MAX_REMOTE = 95 * 1048576  # Cloudflare's free plan refuses request bodies over 100 MB
+UPLOAD_MAX_JOBS = 3               # queued or processing at once
+UPLOAD_DIR_CAP = 4 << 30          # inputs and results together
+UPLOAD_RESERVE = 2 << 30          # free space kept on the data partition (facepipe checks it too)
+UPLOAD_MAX_S = 1800               # 30 minutes
+UPLOAD_KEEP_S = 7 * 86400         # owner, 2026-11-07: deleted 7 days after upload
+GPU_LOCK = os.path.join(DATA, "gpu-batch.lock")  # held by facepipe for an upload, by enrollment here: never both at once
+
+
+def up_read(d, name, default=""):
+    try:
+        with open(os.path.join(d, name), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def du(path):
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def free_bytes(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def uploads():
+    """newest first: id, dir, state ("uploading" while the file arrives), meta, reason, progress"""
+    out = []
+    for i in (os.listdir(UPLOADS) if os.path.isdir(UPLOADS) else []):
+        d = os.path.join(UPLOADS, i)
+        if not UPLOAD_ID_RE.match(i) or not os.path.isdir(d):
+            continue
+        u = {"id": i, "dir": d, "state": up_read(d, "state", "uploading"), "reason": up_read(d, "reason")}
+        for k, f in (("meta", "meta.json"), ("progress", "progress.json")):
+            try:
+                u[k] = json.loads(up_read(d, f, "{}"))
+            except ValueError:
+                u[k] = {}
+        out.append(u)
+    return sorted(out, key=lambda u: u["meta"].get("created", 0), reverse=True)
+
+
+def cleanup_uploads(now=None):
+    """7-day retention; an upload that never finished arriving (browser closed) goes after an hour"""
+    now = now or time.time()
+    for u in uploads():
+        part = os.path.join(u["dir"], "input.part")
+        stale = u["state"] == "uploading" and now - (os.path.getmtime(part) if os.path.exists(part) else os.path.getmtime(u["dir"])) > 3600
+        old = u["state"] != "processing" and now - u["meta"].get("created", now) > UPLOAD_KEEP_S
+        if stale or old:
+            shutil.rmtree(u["dir"], ignore_errors=True)
+
+
+def probe_video(path):
+    """(meta, None) for a video facepipe will process, or (None, reason). gst-discoverer runs in its own process, so a
+    file that crashes a demuxer here crashes only the check (facepipe re-checks the limits while decoding)."""
+    try:
+        r = subprocess.run(["gst-discoverer-1.0", "-v", "-t", "20", path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=40)
+    except (OSError, subprocess.SubprocessError):
+        return None, "the video could not be checked"
+    return parse_discoverer(r.returncode, r.stdout.decode(errors="replace"))
+
+
+def parse_discoverer(code, text):
+    codec = re.search(r"^\s+video: video/x-(h264|h265)\b", text, re.M)
+    w, h = re.search(r"^\s+Width: (\d+)", text, re.M), re.search(r"^\s+Height: (\d+)", text, re.M)
+    d = re.search(r"^\s*Duration: (\d+):(\d\d):(\d\d(?:\.\d+)?)", text, re.M)
+    if code != 0 or not re.search(r"^\s+video: ", text, re.M):
+        return None, "this file is not a video the device can read"
+    if not codec:
+        return None, "only H.264 or H.265 videos are processed (most phones and cameras record these)"
+    if not (w and h and d):
+        return None, "the video's size or length could not be read"
+    w, h = int(w.group(1)), int(h.group(1))
+    secs = int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3))
+    if w > 1920 or h > 1080:
+        return None, "the video is larger than 1920 x 1080"
+    if not 0 < secs <= UPLOAD_MAX_S:
+        return None, "the video is longer than 30 minutes"
+    return {"width": w, "height": h, "duration": round(secs, 2), "codec": codec.group(1).upper().replace("H2", "H.2")}, None
+
+
+def receive_upload(rfile, n, filename, remote):
+    """stores one video of n bytes from rfile; returns (id, None) or (None, reason)"""
+    limit = UPLOAD_MAX_REMOTE if remote else UPLOAD_MAX_LAN
+    if n <= 0:
+        return None, "choose a video file first"
+    if n > limit:
+        return None, "the file is larger than %d MB%s" % (limit // 1048576, " (the limit through the internet address; "
+                                                          "on the home network it is 500 MB)" if remote else "")
+    os.makedirs(UPLOADS, exist_ok=True)
+    cleanup_uploads()
+    jobs = uploads()
+    if sum(u["state"] in ("uploading", "queued", "processing") for u in jobs) >= UPLOAD_MAX_JOBS:
+        return None, "%d videos are waiting already; try again when one is done" % UPLOAD_MAX_JOBS
+    # the result may be about as large as 4 Mb/s x 30 min x 1.5; reserve that, the file itself and the system reserve
+    need = n + int(UPLOAD_MAX_S * 4e6 / 8 * 1.5)
+    if du(UPLOADS) + need > UPLOAD_DIR_CAP:
+        return None, "the upload space (4 GB) is full; delete older videos first"
+    if free_bytes(UPLOADS) - need < UPLOAD_RESERVE:
+        return None, "the device's disk is almost full"
+    uid = secrets.token_hex(8)
+    d = os.path.join(UPLOADS, uid)
+    os.makedirs(d)
+    part, left = os.path.join(d, "input.part"), n
+    try:
+        with open(part, "wb") as f:
+            while left > 0:
+                chunk = rfile.read(min(1048576, left))
+                if not chunk:
+                    raise OSError("the upload stopped before the end")
+                f.write(chunk)
+                left -= len(chunk)
+                if left and (n - left) % (64 << 20) < 1048576 and free_bytes(UPLOADS) < UPLOAD_RESERVE:
+                    raise OSError("the device's disk is almost full")
+        meta, err = probe_video(part)
+        if err:
+            raise OSError(err)
+    except (OSError, ValueError, socket.timeout) as e:
+        shutil.rmtree(d, ignore_errors=True)
+        return None, str(e) if isinstance(e, OSError) and not isinstance(e, socket.timeout) else "the upload stopped before the end"
+    meta.update(name=re.sub(r"[^\w .()-]", "_", filename)[:80] or "video", size=n, created=time.time())
+    os.replace(part, os.path.join(d, "input"))
+    write_private(os.path.join(d, "meta.json"), json.dumps(meta))
+    write_private(os.path.join(d, "state"), "queued")
+    LOG.write("INFO", "video upload %s queued (%d MB, %.0f s)" % (uid, n // 1048576, meta["duration"]))
+    return uid, None
+
+
+def upload_action(action, uid):
+    """cancel or delete; returns a FLASH key"""
+    d = os.path.join(UPLOADS, uid)
+    if not UPLOAD_ID_RE.match(uid) or not os.path.isdir(d):
+        return "denied"
+    state = up_read(d, "state", "uploading")
+    if action == "cancel" or state == "processing":  # facepipe stops it within a second and marks it cancelled
+        if state in ("queued", "processing"):
+            open(os.path.join(d, "cancel"), "a").close()
+            if state == "queued":
+                write_private(os.path.join(d, "state"), "cancelled")
+        return "up_cancelled"
+    shutil.rmtree(d, ignore_errors=True)
+    return "up_deleted"
+
+
+def page_uploads(csrf, remote, flash=""):
+    cleanup_uploads()
+    st = status()
+    label = {"uploading": ("Uploading", "out"), "queued": ("Waiting", "out"), "processing": ("Processing", "in"),
+             "done": ("Done", "in"), "failed": ("Failed", "bad"), "cancelled": ("Cancelled", "out")}
+
+    def form(action, uid, text, cls=""):
+        return ("<form method='post' action='/uploads/%s'><input type='hidden' name='csrf' value='%s'>"
+                "<input type='hidden' name='id' value='%s'><button class='btn %s' type='submit'>%s</button></form>" % (action, csrf, uid, cls, text))
+    rows = []
+    for u in uploads():
+        m, s = u["meta"], u["state"]
+        note = ""
+        if s == "processing":
+            p = u["progress"]
+            pct = 100.0 * p.get("pos", 0) / max(1.0, p.get("duration", m.get("duration", 1)))
+            note = ("waiting: people are in view of a live camera, which goes first" if p.get("state") == "waiting"
+                    else "%d%% processed" % min(99, pct))
+        elif s == "done":
+            try:
+                found = json.loads(up_read(u["dir"], "result.json", "[]"))
+            except ValueError:
+                found = []
+            names = sorted({display_name(f["name"]) for f in found if f.get("name") != "unknown"})
+            unknown = sum(1 for f in found if f.get("name") == "unknown")
+            note = ", ".join(names + (["%d unknown" % unknown] if unknown else [])) or "no faces found"
+        elif s == "failed":
+            note = u["reason"]
+        acts = ""
+        if s == "done":
+            acts += "<a class='btn primary' href='/uploads/%s/result.mp4'>Download</a>" % u["id"]
+        if s in ("queued", "processing"):
+            acts += form("cancel", u["id"], "Cancel")
+        if s not in ("processing", "uploading"):
+            acts += form("delete", u["id"], "Delete", "danger")
+        lt, cls = label.get(s, (s, "out"))
+        rows.append("<tr><td><b>%s</b><div class='m muted'>%s</div></td><td class='num'>%s</td><td><span class='badge %s'>%s</span>"
+                    "<div class='m'>%s</div></td><td class='num'>%s</td><td class='acts'>%s</td></tr>" % (
+                        esc(m.get("name", "video")), "%s, %d x %d, %d s" % (m.get("codec", ""), m.get("width", 0), m.get("height", 0),
+                                                                             m.get("duration", 0)) if m else "",
+                        "%.1f MB" % (m.get("size", 0) / 1048576.0), cls, lt, esc(note),
+                        hms(datetime.datetime.fromtimestamp(m["created"]).isoformat()) if m.get("created") else "", acts))
+    table = ("<table><thead><tr><th scope='col'>Video</th><th scope='col'>Size</th><th scope='col'>State</th>"
+             "<th scope='col'>Uploaded</th><th scope='col'>Actions</th></tr></thead><tbody>%s</tbody></table>" % "".join(rows)) \
+        if rows else "<p class='empty'>No videos uploaded.</p>"
+    limit = (UPLOAD_MAX_REMOTE if remote else UPLOAD_MAX_LAN) // 1048576
+    body = """<h1>Video upload</h1><p class="sub">Run face recognition on a recorded video. The device draws the boxes and names into a copy you can download. Uploaded videos never count as attendance and are deleted after 7 days.</p>
+<section aria-labelledby="h-up"><div class="sh"><h2 id="h-up">Upload a video</h2><span class="count">H.264 or H.265, up to 1920 x 1080 and 30 minutes, %d MB</span></div>
+<form id="upform" class="body form wide" data-limit="%d" data-csrf="%s">
+<label class="field grow2"><span>Video file</span><input id="upfile" type="file" accept="video/*" required></label>
+<div><button class="btn primary" type="submit">Upload</button> <progress id="upbar" max="100" value="0" hidden></progress> <span id="upmsg" class="m" role="status"></span></div>
+<small class="muted">Live cameras always go first: a video is processed while no one is in view of a live camera.%s</small></form></section>
+<section aria-labelledby="h-list"><div class="sh"><h2 id="h-list">Videos</h2><span class="count">%s</span></div>%s</section>""" % (
+        limit, limit * 1048576, csrf,
+        " Through the internet address the limit is 95 MB; on the home network 500 MB." if remote else "",
+        "recognition " + {"live": "running", "no_video": "waiting for a camera", "stopped": "stopped: videos wait until it runs"}[st["state"]], table)
+    return layout("uploads", "Video upload", body, flash=flash, refresh=any(u["state"] in ("queued", "processing") for u in uploads()))
+
+
 # ---------- server ----------
 MAX_BODY = 4096       # forms here are tiny
 MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
@@ -1407,9 +1649,9 @@ WEB_STARTED = int(time.time())
 SESSION_HOURS = 12
 COOKIE = "fp_session"
 TOKEN_RE = re.compile(r"^v1\.([0-9]{10})\.([0-9a-f]{64})$")
-PAGE_PATHS = ("/", "/live", "/attendance", "/people", "/cameras", "/system")  # where a sign-in may lead back to
-PROTECTED = ("/api/", "/live.mjpg", "/rec/", "/snap/", "/photo/", "/pending/", "/csv")  # 401 before sign-in, never 404
-NEXT_RE = re.compile(r"^/(live|attendance|people|cameras|system)?(\?[A-Za-z0-9=&_.:-]{0,200})?$")
+PAGE_PATHS = ("/", "/live", "/attendance", "/people", "/cameras", "/uploads", "/system")  # where a sign-in may lead back to
+PROTECTED = ("/api/", "/live.mjpg", "/rec/", "/snap/", "/photo/", "/pending/", "/csv", "/uploads/")  # 401 before sign-in, never 404
+NEXT_RE = re.compile(r"^/(live|attendance|people|cameras|uploads|system)?(\?[A-Za-z0-9=&_.:-]{0,200})?$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1539,6 +1781,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         if partial:
             self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        for k, v in getattr(self, "extra_headers", {}).items():
+            self.send_header(k, v)
         self.headers_common()
         self.end_headers()
         if self.command == "HEAD":
@@ -1612,6 +1856,7 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        self.extra_headers = {}  # per request (a kept-alive connection reuses this handler)
         url = urlparse(self.path)
         if url.path.startswith("/static/") and url.path[8:] in STATIC:  # public assets, no data in them
             return self.file(os.path.join(WEB_DIR, url.path[8:]), STATIC[url.path[8:]], cache="public, max-age=3600")
@@ -1653,6 +1898,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.html_page(page_cameras(self.csrf(), q.get("msg", [""])[0]))
         if url.path == "/system":
             return self.html_page(page_system(self.csrf(), q.get("msg", [""])[0]))
+        if url.path == "/uploads":
+            return self.html_page(page_uploads(self.csrf(), self.https(), q.get("msg", [""])[0]))
+        m = re.match(r"^/uploads/([0-9a-f]{16})/result\.mp4$", url.path)
+        if m and up_read(os.path.join(UPLOADS, m.group(1)), "state") == "done":
+            name = os.path.splitext(json.loads(up_read(os.path.join(UPLOADS, m.group(1)), "meta.json", "{}")).get("name", "video"))[0]
+            self.extra_headers = {"Content-Disposition": "attachment; filename=\"%s-recognized.mp4\"" % re.sub(r"[^\w.-]", "_", name)}
+            return self.file(os.path.join(UPLOADS, m.group(1), "result.mp4"), cache="no-store")
         if url.path == "/live.mjpg":
             return self.live()
         if url.path == "/api/health":  # the panel's markup, so the page needs no template of its own
@@ -1710,6 +1962,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"ok": True, "next": "/register/done"}), "application/json")
         return self.redirect("/register/done")
 
+    def upload_post(self):
+        """a video as the raw request body (sent by the page's script with a progress bar); answers JSON"""
+        ok = self.same_origin() and hmac.compare_digest(self.headers.get("X-CSRF", "").encode(errors="replace"), self.csrf().encode())
+        try:
+            n = int(self.headers.get("Content-Length") or -1)
+        except ValueError:
+            n = -1
+        if not ok or n < 0:
+            self.close_connection = True  # the body is not read
+            return self.send(403 if not ok else 411, json.dumps({"ok": False, "error": "refused; reload the page"}), "application/json")
+        uid, err = receive_upload(self.rfile, n, unquote(self.headers.get("X-Filename", "video"))[:200], self.https())
+        if err:
+            self.close_connection = True
+            LOG.write("WARNING", "video upload refused: %s" % err)
+            return self.send(400, json.dumps({"ok": False, "error": err}), "application/json")
+        return self.send(200, json.dumps({"ok": True, "id": uid}), "application/json")
+
     def do_POST(self):
         if urlparse(self.path).path == "/register":
             return self.register_post()
@@ -1718,6 +1987,8 @@ class Handler(BaseHTTPRequestHandler):
         user = self.user()
         if not user:
             return self.send(401, "Login required", "text/plain; charset=utf-8")
+        if urlparse(self.path).path == "/uploads/add":
+            return self.upload_post()
         n = int(self.headers.get("Content-Length") or 0)
         if n > MAX_BODY:
             return self.send(413, "Too large", "text/plain; charset=utf-8")
@@ -1725,7 +1996,7 @@ class Handler(BaseHTTPRequestHandler):
         token = form.get("csrf", [""])[0]
         if not self.same_origin() or not hmac.compare_digest(token.encode(errors="replace"), self.csrf().encode()):
             LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_ip()))
-            back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras") else "system")
+            back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras", "uploads") else "system")
             return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
         if path == "/logout":
@@ -1761,6 +2032,8 @@ class Handler(BaseHTTPRequestHandler):
             if test:  # the test result is shown on the page itself, without a redirect
                 return self.html_page(page_cameras(self.csrf(), msg, test))
             return self.redirect("/cameras?msg=" + msg)
+        if path in ("/uploads/cancel", "/uploads/delete"):
+            return self.redirect("/uploads?msg=" + upload_action(path.rsplit("/", 1)[1], form.get("id", [""])[0]))
         if path == "/people/remove":
             person = form.get("person", [""])[0]
             if person not in enrolled() or not KEY_RE.match(person):
@@ -1948,6 +2221,7 @@ def selftest_http():
     assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
     selftest_registration(get, host)
     selftest_cameras(get, host, srv.sign("csrf:v1"))
+    selftest_uploads(get, host, srv.sign("csrf:v1"))
     srv.shutdown()
     os.remove(srv.auth_file)
 
@@ -2026,6 +2300,67 @@ def selftest_cameras(get, host, tok):
     assert get("/cameras/source", headers=hd, data=("csrf=%s&source=rtsp&csi=0&size=1920x1080" % tok).encode())[1]["Location"] == "/cameras?msg=cam_none_enabled"
     assert get("/cameras/remove", headers=hd, data=("csrf=%s&id=%s" % (tok, cid)).encode())[1]["Location"] == "/cameras?msg=cam_removed"
     assert load_cameras()["rtsp"] == [] and not os.path.exists(CAM_ACTIVE)
+    # two at once (D-039): each enabled camera is one line with its id and name; a third is refused
+    two = [{"id": "a1", "name": "Gate", "url": "rtsp://a/s", "enabled": True},
+           {"id": "b2", "name": "Back door", "url": "rtsp://b/s", "enabled": True},
+           {"id": "c3", "name": "Yard", "url": "rtsp://c/s", "enabled": False}]
+    cfg = {"source": "csi", "csi": "0", "usb": "", "size": "1280x720", "rtsp": two}
+    assert active_line(dict(cfg, source="rtsp")) == "rtsp://a/s 1280 720 a1 Gate\nrtsp://b/s 1280 720 b2 Back door"
+    write_private(CAM_JSON, json.dumps(cfg))
+    assert get("/cameras/toggle", headers=hd, data=("csrf=%s&id=c3" % tok).encode())[1]["Location"] == "/cameras?msg=cam_two"
+    assert not load_cameras()["rtsp"][2]["enabled"]
+    write_private(CAM_ACTIVE, active_line(dict(cfg, source="rtsp")) + "\n")
+    assert camera_label() == "Gate and Back door (network cameras)", camera_label()
+    for p in (CAM_JSON, CAM_ACTIVE):
+        os.remove(p)
+
+
+def selftest_uploads(get, host, tok):
+    """video uploads (D-039): the discoverer's verdict, limits, retention, and the guarded routes; in a temporary folder"""
+    import tempfile
+    g = globals()
+    saved = g["UPLOADS"], g["UPLOAD_RESERVE"]
+    g["UPLOADS"], g["UPLOAD_RESERVE"] = tempfile.mkdtemp(), 0  # never the real uploads; any free space will do here
+    try:
+        selftest_uploads_in(get, host, tok)
+    finally:
+        shutil.rmtree(g["UPLOADS"], ignore_errors=True)
+        g["UPLOADS"], g["UPLOAD_RESERVE"] = saved
+
+
+def selftest_uploads_in(get, host, tok):
+    good = ("Done discovering file:///x\n  container: video/quicktime\n    video: video/x-h264, width=(int)1920\n"
+            "      Width: 1920\n      Height: 540\n  Duration: 0:00:08.940165061\n")
+    meta, err = parse_discoverer(0, good)
+    assert not err and meta == {"width": 1920, "height": 540, "duration": 8.94, "codec": "H.264"}, (meta, err)
+    assert parse_discoverer(0, good.replace("x-h264", "x-h265"))[0]["codec"] == "H.265"
+    assert "H.264 or H.265" in parse_discoverer(0, good.replace("video/x-h264", "video/x-vp9"))[1]
+    assert "1920 x 1080" in parse_discoverer(0, good.replace("Width: 1920", "Width: 3840"))[1]
+    assert "30 minutes" in parse_discoverer(0, good.replace("0:00:08", "0:31:00"))[1]
+    assert "not a video" in parse_discoverer(1, good)[1] and "not a video" in parse_discoverer(0, "  audio: x\n")[1]
+    assert "larger than 95 MB" in receive_upload(io.BytesIO(b""), 96 << 20, "a.mp4", True)[1]
+    assert "choose a video" in receive_upload(io.BytesIO(b""), 0, "a.mp4", False)[1]
+    assert "stopped before the end" in receive_upload(io.BytesIO(b"abc"), 10, "a.mp4", False)[1]
+    assert not [u for u in uploads() if u["state"] == "uploading"]  # a broken upload leaves nothing behind
+    # retention: 7 days after upload, never while processing
+    for uid, state, age in (("a" * 16, "done", 8), ("b" * 16, "processing", 8), ("c" * 16, "failed", 1)):
+        d = os.path.join(UPLOADS, uid)
+        os.makedirs(d, exist_ok=True)
+        write_private(os.path.join(d, "state"), state)
+        write_private(os.path.join(d, "meta.json"), json.dumps({"name": "v.mp4", "created": time.time() - age * 86400}))
+    cleanup_uploads()
+    assert sorted(u["id"] for u in uploads()) == ["b" * 16, "c" * 16]
+    hd = {"Origin": "http://" + host}
+    code, _, body = get("/uploads")
+    assert code == 200 and b"v.mp4" in body and b"Video upload" in body
+    assert get("/uploads/" + "c" * 16 + "/result.mp4")[0] == 404  # only finished results
+    assert get("/uploads/" + "c" * 16 + "/result.mp4", auth=None)[0] == 401
+    assert get("/uploads/add", headers={"Origin": "http://evil", "X-CSRF": tok}, data=b"x")[0] == 403
+    assert get("/uploads/add", headers=dict(hd, **{"X-CSRF": "wrong"}), data=b"x")[0] == 403
+    assert get("/uploads/delete", headers=hd, data=("csrf=%s&id=%s" % (tok, "c" * 16)).encode())[1]["Location"] == "/uploads?msg=up_deleted"
+    assert get("/uploads/delete", headers=hd, data=("csrf=%s&id=../x" % tok).encode())[1]["Location"] == "/uploads?msg=denied"
+    assert get("/uploads/cancel", headers=hd, data=("csrf=%s&id=%s" % (tok, "b" * 16)).encode())[1]["Location"] == "/uploads?msg=up_cancelled"
+    assert os.path.exists(os.path.join(UPLOADS, "b" * 16, "cancel"))  # facepipe stops it and marks it cancelled
 
 
 def selftest_registration(get, host):

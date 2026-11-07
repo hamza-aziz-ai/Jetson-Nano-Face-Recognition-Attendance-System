@@ -4,7 +4,7 @@ Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "S
 
 ## Versions
 
-- `main`: v1.8.1 (5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
+- `main`: v1.9.0 (two cameras and video upload, D-039; v1.8.1 5-minute repeat rule, D-038; v1.8.0 sign-in page, D-036) released by the workflow; the device's update timer (D-031) deploys each release within 10 minutes. v1.7.2 fixed the camera label on the System page.
 - Camera in use: the owner's phone over RTSP (chosen on the Cameras page); face matching L2 <= 0.90 (System page).
 
 ## Device
@@ -40,14 +40,13 @@ Snapshot: **2026-11-07 03:10 IST**. Volatile state; verify before acting (see "S
 - Owner removed Cloudflare Access: the site's own sign-in page is the only lock. Owner told the password must be strong.
 - Maintenance page: Worker `facepipe-maintenance` deployed with the owner's `wrangler login` on the page routes (`sh deploy/maintenance/deploy.sh attendance.hamzaaziz.dev`).
 
-## Next (owner's request of 2026-11-06, in order)
+## Next (owner)
 
-1. End-to-end tests on RTSP, file, USB and CSI (owner in front of the live cameras).
-2. Multi-page website (v1.1.0): Overview, Attendance, Live (MJPEG of the RTSP stream), People/Registration, Settings; start/stop/restart the service from the web (narrow sudoers rule, exact commands need owner approval); self-service registration with admin approval and recorded consent; update or delete people.
-3. Video upload (v1.2.0): queued jobs beside the live camera, annotated video saved for download, never counted as attendance.
-4. Up to 2 cameras (v1.3.0): enable or disable each from the website.
+1. Users from the admin portal (owner, 2026-11-07): admin (everything) and viewer (attendance only, e.g. family), added by email, phone number or both. Security design: council with Codex first.
+2. Reconnect test of two cameras: the owner switches the phone stream off and on (needs the owner); then the hardware gate of D-039 on a 5 V 4 A barrel supply.
 
 ## Still open
 
 - Self-hosted runner: the owner registers it (token never typed by an agent); restricted user and sudo rule need exact-command approval.
 - MLOps model manifest; LFW evaluation (download needs owner permission); license choice (InsightFace models are non-commercial).
+- Power: the Nano runs from a phone charger over micro-USB (owner, 2026-11-07); `soctherm: OC ALARM` every few seconds and CPU clocks drop to 1224 MHz. Advised 5 V 4 A barrel jack with J48; final two-camera numbers only after that.

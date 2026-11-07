@@ -5,6 +5,8 @@ Marked **seen** where it actually happened on the device, otherwise **from the c
 | Dependency | If it is down, slow or wrong | How it shows | Recovery |
 | --- | --- | --- | --- |
 | Camera (RTSP) | Pipeline error, process exits | Status badge "service stopped" or "waiting for the camera"; `Failed to connect` in the journal (**seen**) | systemd restarts every 10 s until the camera is back (**seen**) |
+| One of two cameras down | Its tile shows the last picture with "<name>: offline"; the other camera keeps running | Overview says "<name> offline"; `camera error` warning in the log (**seen**: a wrong address at start, the other camera ran at 14.8 fps) | nvurisrcbin reconnects after 10 s without data (**from the code**; a camera coming back is not yet tested on the device) |
+| Uploaded video crashes a decoder | facepipe restarts (about 20 s without recognition) | Upload marked failed: "interrupted" | Never retried; upload a re-encoded copy (**from the code**) |
 | Camera IP changes (DHCP) | Never connects | Same as above (**seen**: .20 to .22 and back) | Fix the URI in `facepipe.env`, or a router DHCP reservation |
 | Wi-Fi packet loss | 4-5 fps over UDP (**seen**) | Low fps in status | RTSP forced to TCP |
 | USB webcam in dim light | Camera halves its frame rate (**seen**) | Low fps | `exposure_auto_priority=0` set by the source |

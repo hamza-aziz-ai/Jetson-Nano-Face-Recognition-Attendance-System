@@ -167,3 +167,4 @@ body.public{min-height:100vh;display:flex;flex-direction:column;background:linea
  .kv{grid-template-columns:1fr}th:nth-child(5),td:nth-child(5){display:none}
 }
 @media print{.side,.topbar,.noprint,.toolbar{display:none!important}.shell{margin:0}body{background:#fff}section,.card{box-shadow:none;border-color:#bbb;break-inside:avoid}main{padding:0}}
+td .m{font-size:.84rem;margin-top:.15rem}td .m.muted{color:var(--muted)}#upbar{width:12rem;vertical-align:middle}

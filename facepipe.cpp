@@ -10,6 +10,10 @@
 // Video:  tracker -> nvdsosd (boxes + names) -> tee: NVJPG 1080p JPEG (live web view, event evidence image) and
 //         NVENC H.264 (RTSP rtsp://<nano>:8554/live with login; event clips 3 s before to 5 s after, in $FACEPIPE_REC).
 // Sources: rtsp:// file:// http:// (NVDEC), csi:<sensor-id> (Argus/ISP), usb:/dev/videoN (MJPEG on NVJPG, or raw).
+//         Two network cameras (D-039): two nvurisrcbin into one mux (batch 2), tracker, then nvmultistreamtiler side by
+//         side before OSD; per-camera events and repeat rule; one detection per batch, cameras taking turns.
+// Upload: videos from the website (data/uploads/<id>/) run one at a time in a second pipeline in this process, sharing
+//         the engines; live goes first; the annotated MP4 is the result; never attendance (D-039).
 // Enroll: facepipe-enroll <gallery_dir>  (same source, -DFACEPIPE_ENROLL; gallery_dir/<person name>/*.jpg|png)
 //         -> $FACEPIPE_GALLERY, reloaded live.
 // Preprocessing and alignment match InsightFace-REST (SCRFD (x-127.5)/128 RGB, ArcFace x/127.5-1 RGB,
@@ -54,7 +58,10 @@
 #include <ctime>
 #include <deque>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -62,6 +69,7 @@
 #include <sys/statvfs.h>
 #include <sys/time.h>
 #include <thread>
+#include <tuple>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -431,8 +439,40 @@ static bool rec_ok() { return access(REC_DIR.c_str(), W_OK) == 0; }  // the /mnt
 
 static std::mutex j_mu;
 static std::condition_variable j_cv;
-static std::vector<unsigned char> jpeg;  // latest annotated frame, 1080p
-static GstClockTime jpeg_pts = GST_CLOCK_TIME_NONE;  // timestamp of that frame
+// Key: camera, its generation, tracker id. A result is applied only if its track is still pending under the same key, so
+// a result for a camera that reconnected, or computed while the gallery changed (tracks cleared), labels nothing.
+struct TKey {
+  int cam; unsigned gen; guint64 id;
+  bool operator<(const TKey &o) const { return std::tie(cam, gen, id) < std::tie(o.cam, o.gen, o.id); }
+  bool operator==(const TKey &o) const { return cam == o.cam && gen == o.gen && id == o.id; }
+};
+// Evidence (D-039): the frame saved for an event must show the decided name. A request lists the PTS of batches in which
+// its camera had a fresh frame and the track carried the decided label (filled by the tracker probe); on_jpeg keeps the
+// JPEG of such a batch; the worker writes it. Exact batches, not "later than": a later batch may lack the track, and the
+// tiler repeats a stalled camera's last picture without its labels.
+struct EvReq { TKey key; std::vector<GstClockTime> cert; std::vector<unsigned char> jpg; bool done = false; };
+static std::vector<EvReq *> ev_reqs;  // guarded by j_mu
+
+// tracker side: this batch (pts) shows the decided label of the tracks in `shown`, each on a fresh frame of its camera
+static void certify_batch(const std::vector<TKey> &shown, GstClockTime pts) {
+  std::lock_guard<std::mutex> lk(j_mu);
+  for (auto *r : ev_reqs)
+    if (!r->done && r->cert.size() < 16 && std::find(shown.begin(), shown.end(), r->key) != shown.end()) r->cert.push_back(pts);
+}
+
+// encoder side: keep this JPEG for every request that certified its batch; true if one did
+static bool offer_jpeg(GstClockTime pts, const unsigned char *data, size_t size) {
+  bool hit = false;
+  std::lock_guard<std::mutex> lk(j_mu);  // only a copy here; the worker writes the file
+  for (auto *r : ev_reqs)
+    if (!r->done && std::find(r->cert.begin(), r->cert.end(), pts) != r->cert.end()) {
+      r->jpg.assign(data, data + size);
+      r->done = hit = true;
+    }
+  return hit;
+}
+
+static std::atomic<long> n_out{0};  // annotated frames out of the live pipeline (watchdog: output progress)
 
 static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
   GstSample *smp = gst_app_sink_pull_sample(s);
@@ -440,12 +480,8 @@ static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
   GstMapInfo m;
   GstBuffer *b = gst_sample_get_buffer(smp);
   if (gst_buffer_map(b, &m, GST_MAP_READ)) {
-    {
-      std::lock_guard<std::mutex> lk(j_mu);
-      jpeg.assign(m.data, m.data + m.size);
-      jpeg_pts = GST_BUFFER_PTS(b);
-    }
-    j_cv.notify_all();
+    n_out++;
+    if (offer_jpeg(GST_BUFFER_PTS(b), m.data, m.size)) j_cv.notify_all();
     struct stat st;  // the web page touches "want" while someone watches; write live.jpg only then
     if (stat((LIVE_DIR + "/want").c_str(), &st) == 0 && time(nullptr) - st.st_mtime < 10) {
       std::string tmp = LIVE_DIR + "/live.jpg.tmp";
@@ -461,12 +497,14 @@ static GstFlowReturn on_jpeg(GstAppSink *s, gpointer) {
   return GST_FLOW_OK;
 }
 
-// first annotated JPEG of a frame labelled after `after` (so the decided name is drawn), or empty after 1.5 s
-static std::vector<unsigned char> jpeg_after(GstClockTime after) {
+// the request's certified JPEG within 1.5 s, or empty; the request is withdrawn either way
+static std::vector<unsigned char> take_evidence(EvReq &r) {
   std::unique_lock<std::mutex> lk(j_mu);
-  auto ready = [after] { return GST_CLOCK_TIME_IS_VALID(jpeg_pts) && jpeg_pts > after; };
-  j_cv.wait_for(lk, std::chrono::milliseconds(1500), ready);
-  return ready() ? jpeg : std::vector<unsigned char>();
+  j_cv.wait_for(lk, std::chrono::milliseconds(1500), [&r] { return r.done || stopping; });
+  ev_reqs.erase(std::remove(ev_reqs.begin(), ev_reqs.end(), &r), ev_reqs.end());
+  std::vector<unsigned char> j;
+  j.swap(r.jpg);
+  return j;
 }
 
 static const GstClockTime CLIP_PRE = 3 * GST_SECOND, CLIP_POST = 5 * GST_SECOND;
@@ -628,10 +666,9 @@ static std::string clip_trigger() {
   return clip_open(rel) ? rel : "";
 }
 
-static std::string save_evidence(guint64 track, GstClockTime after) {
-  if (stopping || !rec_ok()) return "";
-  auto j = jpeg_after(after);
-  if (j.empty()) return "";
+static std::string save_evidence(guint64 track, EvReq &r) {
+  auto j = take_evidence(r);
+  if (stopping || !rec_ok() || j.empty()) return "";
   std::string day, hms;
   stamp(day, hms);
   mkdir((REC_DIR + "/" + day).c_str(), 0755);
@@ -666,7 +703,54 @@ static void write_bmp(const std::string &path, const cv::Mat &rgb) {
   fclose(f);
 }
 
-static void log_event(guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
+struct Cam;
+static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
+                      const std::string &frame, const std::string &clip_rel);
+
+// ---- cameras (D-039): up to 2 network cameras in one pipeline (one mux, shared engines); USB, CSI or a file stay one.
+// data/cameras.active: one line per camera, "<uri> <width> <height> [<id> [<name>]]" (written by the website; the id is the
+// stable one from cameras.json). Index = nvstreammux pad = NvDsFrameMeta.source_id. gen rises when a camera comes back
+// after a gap, so a recognition result computed for the old stream never labels a track of the new one.
+struct Cam {
+  std::string uri, id = "cam0", name = "Camera";
+  int w = 0, h = 0;
+  std::atomic<long> last_frame_s{0}, frames{0}, last_face_s{0};  // steady seconds; frames for the per-camera fps
+  std::atomic<unsigned> gen{0};
+  unsigned long long idle_n = 0;  // streaming thread only
+  bool was_idle = false;          // streaming thread only
+};
+static const int MAX_CAMS = 2;
+static Cam cams[MAX_CAMS];
+static int n_cams = 1;
+
+// one line of cameras.active; false if it is not "<uri> <w> <h> ..."
+static bool parse_cam_line(const std::string &line, Cam &c) {
+  std::istringstream ls(line);
+  std::string uri, id, name;
+  int w = 0, h = 0;
+  if (!(ls >> uri >> w >> h) || uri.empty() || w <= 0 || h <= 0) return false;
+  c.uri = uri; c.w = w; c.h = h;
+  if (ls >> id) c.id = id;
+  std::getline(ls, name);
+  size_t b = name.find_first_not_of(' ');
+  if (b != std::string::npos) c.name = name.substr(b);
+  return true;
+}
+
+// all cameras of the file; more than one only if every one is a network camera (D-034)
+__attribute__((unused)) static int read_cameras(const std::string &path) {  // unused in facepipe-enroll
+  std::ifstream f(path);
+  std::string line;
+  int n = 0;
+  while (n < MAX_CAMS && std::getline(f, line))
+    if (parse_cam_line(line, cams[n])) n++;
+  if (n > 1)
+    for (int i = 0; i < n; i++)
+      if (cams[i].uri.rfind("rtsp", 0) != 0) { LOGW("several cameras need all to be network cameras: using the first"); return 1; }
+  return n;
+}
+
+static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
                       const std::string &frame, const std::string &clip_rel) {
   auto now = std::chrono::system_clock::now();
   std::string day_s, hms_s, iso_s;
@@ -681,10 +765,10 @@ static void log_event(guint64 track, const std::string &name, float score, float
   if (!f) { LOGE("cannot write events in %s", DATA_DIR.c_str()); return; }
   // score is always the best cosine; metric and l2 record which rule decided and the matching L2 distance
   fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
-             "\"snap\":%s,\"frame\":%s,\"clip\":%s}\n",
+             "\"snap\":%s,\"frame\":%s,\"clip\":%s,\"camera\":%s,\"camera_name\":%s}\n",
           iso, std::chrono::duration<double>(now.time_since_epoch()).count(), (unsigned long long)track,
           json_str(name).c_str(), score, METRIC_L2 ? "l2" : "cosine", l2_of(score), det, json_str(snap).c_str(),
-          json_str(frame).c_str(), json_str(clip_rel).c_str());
+          json_str(frame).c_str(), json_str(clip_rel).c_str(), json_str(cam.id).c_str(), json_str(cam.name).c_str());
   fclose(f);
 }
 
@@ -692,20 +776,21 @@ static void log_event(guint64 track, const std::string &name, float score, float
 // not logged again (no event, snapshot, frame or clip), so someone who stays in view is logged once every REPEAT_S, not
 // once per tracker id. Unknown faces have no name: one repeats an unknown logged in the window whose face it would match
 // under the active metric. Seeded from today's events file at start, so a restart or camera reconnect does not log
-// everyone again (unknowns are not: the file keeps no embeddings). Worker thread only.
+// everyone again (unknowns are not: the file keeps no embeddings). Per camera, as in the CCTV system (key person +
+// camera): the same person at the other camera is logged. Worker thread only.
 static const double REPEAT_S = 300;
-struct Logged { std::string name; double ts; std::vector<float> emb; };
+struct Logged { std::string cam, name; double ts; std::vector<float> emb; };
 static std::deque<Logged> logged;
-static bool repeat(const std::string &name, const std::vector<float> &e, double now) {
+static bool repeat(const std::string &cam, const std::string &name, const std::vector<float> &e, double now) {
   while (!logged.empty() && now - logged.front().ts >= REPEAT_S) logged.pop_front();
   for (auto &r : logged) {
-    if (r.name != name) continue;
+    if (r.cam != cam || r.name != name) continue;
     if (name != "unknown") return true;
     float s = 0;
     for (int k = 0; k < 512; k++) s += e[k] * r.emb[k];
     if (passes(s)) return true;
   }
-  logged.push_back({name, now, name == "unknown" ? e : std::vector<float>()});
+  logged.push_back({cam, name, now, name == "unknown" ? e : std::vector<float>()});
   return false;
 }
 static void seed_repeats() {
@@ -714,27 +799,37 @@ static void seed_repeats() {
   std::ifstream f(DATA_DIR + "/events-" + day + ".jsonl");
   std::string line;
   while (std::getline(f, line)) {
-    size_t t = line.find("\"ts\":"), n = line.find("\"name\":\"");
+    size_t t = line.find("\"ts\":"), n = line.find("\"name\":\""), c = line.find("\"camera\":\"");
     if (t == std::string::npos || n == std::string::npos) continue;
     std::string name = line.substr(n + 8, line.find('"', n + 8) - n - 8);
-    if (name != "unknown") logged.push_back({name, std::atof(line.c_str() + t + 5), {}});
+    // events before v1.9.0 have no camera: they count for the first camera (the only one then)
+    std::string cam = c == std::string::npos ? cams[0].id : line.substr(c + 10, line.find('"', c + 10) - c - 10);
+    if (name != "unknown") logged.push_back({cam, name, std::atof(line.c_str() + t + 5), {}});
   }
 }
 
 // ---- per-track state, shared by the tracker probe (producer) and the worker ----
-static GstClockTime last_label_pts = 0;  // PTS of the last frame labelled (guarded by st_mu)
 struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false; std::string name; float score = 0; };
 static std::mutex st_mu;
-static std::unordered_map<guint64, TrackState> tracks;  // ponytail: cleared at 100k tracks; prune by last-seen if long runs need it
+static std::map<TKey, TrackState> tracks;  // ponytail: cleared at 100k tracks; prune by last-seen if long runs need it
 
-struct Job { guint64 track; gint frame; float box[5]; cv::Mat face; };  // face: 112x112 RGB u8
+struct Job { TKey key; gint frame; float box[5]; cv::Mat face; };  // face: 112x112 RGB u8; key.cam < 0: upload job key.gen
+
+// ---- uploads (D-039): one video at a time in its own pipeline inside this process (engines shared, live first). Its jobs
+// share the worker but wait while live jobs are queued; they never touch attendance, evidence, clips or the repeat rule.
+struct UTrack { TrackState s; double first = -1, last = -1; };
+static std::map<guint64, UTrack> upl_tracks;  // st_mu; the current upload's tracks
+static std::atomic<unsigned> upl_seq{0};      // current upload number; a result for another one labels nothing
+static std::deque<Job> q_upl;                 // q_mu
+static int upl_pending = 0;                   // st_mu; upload faces queued or being recognized
+static std::condition_variable upl_cv;        // with st_mu: upl_pending fell
 static std::mutex q_mu;
 static std::condition_variable q_cv;
 static std::deque<Job> q_jobs;
 static std::atomic<bool> q_stop{false};
 static FILE *json_out = stdout;  // real stdout; fd 1 is pointed at stderr so DeepStream's own prints don't mix in
 static const size_t Q_MAX = 32;  // drop jobs if the GPU falls behind instead of growing memory
-static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0}, n_repeats{0};
+static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dropped{0}, n_repeats{0}, n_stale{0};
 
 // Watchdog thread, always running. (1) No frame for FACEPIPE_WATCHDOG seconds (default 60, 0 = off): exit 3 so systemd
 // restarts us. A thread, not a GLib timer: the CSI stall of 2026-11-06 happened before the main loop ran, and a stalled
@@ -743,7 +838,7 @@ static std::atomic<long> n_frames{0}, n_faces{0}, n_known{0}, n_unknown{0}, n_dr
 static void start_watchdog() {
   int limit = std::atoi(env("FACEPIPE_WATCHDOG", "60").c_str());
   std::thread([limit] {
-    long last = n_frames, since = steady_s();  // counted from start: the first exit is at `limit` s, not 5 s later
+    long last = n_frames, last_out = n_out, since = steady_s();  // counted from start: the first exit is at `limit` s
     while (true) {
       std::this_thread::sleep_for(std::chrono::seconds(1));
       long now = steady_s();
@@ -754,10 +849,11 @@ static void start_watchdog() {
         }
         continue;
       }
-      long f = n_frames;
-      if (f != last) { last = f; since = now; }
+      // both must move: camera frames into the live pipeline and annotated frames out of it (uploads count for neither)
+      long f = n_frames, o = n_out;
+      if (f != last && o != last_out) { last = f; last_out = o; since = now; }
       else if (limit > 0 && now - since >= limit) {
-        LOGE("watchdog: no frames for %d s, exiting so the service restarts", limit);
+        LOGE("watchdog: no live frames %s for %d s, exiting so the service restarts", f != last ? "out" : "in", limit);
         _exit(3);
       }
     }
@@ -768,15 +864,17 @@ static void rec_worker() {
   Engine rec;
   rec.load(REC_ENGINE.c_str(), nvinfer1::Dims4{1, 3, 112, 112});
   Gallery gal;
+  gal.reload_if_changed();  // before the first job: a later reload clears the tracks (names may be stale), the first must not
   seed_repeats();
   while (true) {
     Job j;
     {
       std::unique_lock<std::mutex> lk(q_mu);
-      q_cv.wait(lk, [] { return q_stop || !q_jobs.empty(); });
-      if (q_jobs.empty()) break;
-      j = std::move(q_jobs.front());
-      q_jobs.pop_front();
+      q_cv.wait(lk, [] { return q_stop || !q_jobs.empty() || !q_upl.empty(); });
+      if (q_jobs.empty() && q_upl.empty()) break;
+      auto &q = q_jobs.empty() ? q_upl : q_jobs;  // live faces first
+      j = std::move(q.front());
+      q.pop_front();
     }
     if (gal.reload_if_changed()) {  // people added, updated or removed: names cached on live tracks may be stale
       std::lock_guard<std::mutex> lk(st_mu);
@@ -787,29 +885,53 @@ static void rec_worker() {
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     auto m = gal.match(e);
     bool known = m.first != "unknown";
-    int tries;
-    GstClockTime decided_after;  // frames labelled up to this timestamp may still show the old label
+    if (j.key.cam < 0) {  // upload: label the track of the current upload only; no events
+      std::lock_guard<std::mutex> lk(st_mu);
+      auto it = upl_tracks.find(j.key.id);
+      if (j.key.gen == upl_seq && it != upl_tracks.end() && it->second.s.pending) {
+        auto &s = it->second.s;
+        s.pending = false;
+        if (known || s.tries >= MAX_TRIES) { s.done = true; s.name = m.first; s.score = m.second; }
+      }
+      upl_pending--;
+      upl_cv.notify_all();
+      continue;
+    }
+    int tries = 0;
     {
       std::lock_guard<std::mutex> lk(st_mu);
-      decided_after = last_label_pts;
-      auto &s = tracks[j.track];
-      s.pending = false;
-      tries = s.tries;
-      if (known || s.tries >= MAX_TRIES) { s.done = true; s.name = m.first; s.score = m.second; }  // label shows from now
+      auto it = tracks.find(j.key);
+      if (it != tracks.end() && it->second.pending) tries = it->second.tries;
     }
+    if (!tries) { n_stale++; continue; }  // camera reconnected or gallery changed meanwhile: the result belongs to no track
+    const Cam &cam = cams[j.key.cam];
+    bool decided = known || tries >= MAX_TRIES;
     double now = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-    if ((known || tries >= MAX_TRIES) && repeat(m.first, e, now)) n_repeats++;
-    else if (known || tries >= MAX_TRIES) {
+    bool rep = decided && repeat(cam.id, m.first, e, now);
+    EvReq req;
+    req.key = j.key;
+    bool ev = decided && !rep && !stopping && rec_ok();
+    if (ev) { std::lock_guard<std::mutex> lk(j_mu); ev_reqs.push_back(&req); }  // before the label can show
+    {
+      std::lock_guard<std::mutex> lk(st_mu);
+      auto it = tracks.find(j.key);
+      if (it != tracks.end()) {
+        it->second.pending = false;
+        if (decided) { it->second.done = true; it->second.name = m.first; it->second.score = m.second; }  // label shows from now
+      }
+    }
+    if (rep) n_repeats++;
+    else if (decided) {
       std::string c = clip_trigger();       // clip starts CLIP_PRE before now
-      std::string fr = save_evidence(j.track, decided_after);  // first frame labelled after the decision
-      log_event(j.track, m.first, m.second, j.box[4], j.face, fr, c);
+      std::string fr = ev ? save_evidence(j.key.id, req) : "";  // a frame that shows the decided name
+      log_event(cam, j.key.id, m.first, m.second, j.box[4], j.face, fr, c);
       (known ? n_known : n_unknown)++;
     }
     std::string s;
     char tmp[64];
     for (int i = 0; i < 512; i++) { snprintf(tmp, sizeof tmp, i ? ",%.5f" : "%.5f", e[i]); s += tmp; }
     fprintf(json_out, "{\"frame\":%d,\"track\":%llu,\"try\":%d,\"name\":%s,\"score\":%.3f,\"bbox\":[%.0f,%.0f,%.0f,%.0f],\"det\":%.3f,\"rec_ms\":%.1f,\"emb\":[%s]}\n",
-            j.frame, (unsigned long long)j.track, tries, json_str(m.first).c_str(), m.second, j.box[0], j.box[1], j.box[2],
+            j.frame, (unsigned long long)j.key.id, tries, json_str(m.first).c_str(), m.second, j.box[0], j.box[1], j.box[2],
             j.box[3], j.box[4], ms, s.c_str());
     fflush(json_out);
   }
@@ -817,20 +939,45 @@ static void rec_worker() {
 
 // ---- probes ----
 static int mux_w = 1920, mux_h = 1080;
+static const int TILE_W = 1920, TILE_H = 540;  // two cameras: side by side, 960x540 each (D-039)
 
 // ---- detection (D-028): SCRFD in a probe before the tracker instead of nvinfer, whose `interval` cannot change while
 // playing. Every frame while faces are around; after IDLE_AFTER s without one, every IDLE_STEP-th frame. Video buffers
 // always pass, only inference is skipped; a frame without inference keeps bInferDone=FALSE and the tracker only tracks it.
 static int IDLE_AFTER = 10, IDLE_STEP = 6;
-static Engine live_det;
+static Engine live_det;                 // SCRFD, shared by the live pipeline and uploads (D-039)
 static NvBufSurface *det_in = nullptr;  // 640x384 RGBA letterbox target; its padding is zeroed once and never written
-static long last_face_s = 0;            // steady second of the last frame with a face (streaming thread only)
 static std::atomic<long> n_detects{0};
+// One SCRFD transaction at a time (input fill, run, decode all use live_det's buffers). Live first: a live caller announces
+// itself in live_waiting before taking det_mu; an upload checks eligibility again after taking it and steps back.
+static std::mutex det_mu;
+static std::condition_variable det_cv;
+static std::atomic<int> live_waiting{0};
+static bool live_idle(long now) {
+  for (int i = 0; i < n_cams; i++) if (IDLE_AFTER <= 0 || now - cams[i].last_face_s < IDLE_AFTER) return false;
+  return true;
+}
 
 // the policy, separate so the self-test can check it: start active; idle after IDLE_AFTER s without a face
 static bool detect_due(long now, long last_face, unsigned long long &idle_n) {
   if (IDLE_AFTER <= 0 || now - last_face < IDLE_AFTER) { idle_n = 0; return true; }
   return idle_n++ % IDLE_STEP == 0;
+}
+
+// a 640x384 RGBA letterbox target with zeroed padding, or nullptr
+static NvBufSurface *det_surface() {
+  NvBufSurface *s = nullptr;
+  NvBufSurfaceCreateParams cp = {};
+  cp.gpuId = 0;
+  cp.width = NET_W;
+  cp.height = NET_H;
+  cp.colorFormat = NVBUF_COLOR_FORMAT_RGBA;
+  cp.layout = NVBUF_LAYOUT_PITCH;
+  cp.memType = NVBUF_MEM_DEFAULT;
+  if (NvBufSurfaceCreate(&s, 1, &cp) != 0) return nullptr;
+  s->numFilled = 1;
+  if (NvBufSurfaceMemSet(s, 0, 0, 0) != 0) { NvBufSurfaceDestroy(s); return nullptr; }
+  return s;
 }
 
 static bool det_setup() {
@@ -844,13 +991,13 @@ static bool det_setup() {
   cp.memType = NVBUF_MEM_DEFAULT;
   if (NvBufSurfaceCreate(&det_in, 1, &cp) != 0) return false;
   det_in->numFilled = 1;
-  last_face_s = steady_s();  // start active
+  for (auto &c : cams) c.last_face_s = steady_s();  // start active
   return NvBufSurfaceMemSet(det_in, 0, 0, 0) == 0;
 }
 
-// Letterbox frame b into det_in on the VIC (scale by the smaller ratio, top-left, padding right/bottom: what nvinfer did
+// Letterbox frame b into det_in (live or upload surface) on the VIC (scale by the smaller ratio, top-left, padding right/bottom: what nvinfer did
 // with maintain-aspect-ratio=1, symmetric-padding=0), then SCRFD's input: RGB CHW, (x - 127.5) / 128.
-static bool det_prepare(NvBufSurface *surf, int b, float scale) {
+static bool det_prepare(NvBufSurface *surf, int b, float scale, NvBufSurface *det_in) {
   NvBufSurfTransformConfigParams cfg = {};
   cfg.compute_mode = NvBufSurfTransformCompute_Default;  // VIC on Jetson
   if (NvBufSurfTransformSetSessionParams(&cfg) != NvBufSurfTransformError_Success) return false;
@@ -884,10 +1031,17 @@ static bool det_prepare(NvBufSurface *surf, int b, float scale) {
   return true;
 }
 
-static void add_faces(NvDsBatchMeta *bm, NvDsFrameMeta *fm, const std::vector<Face> &faces) {
+// SCRFD on frame b of surf (det_mu held): faces in surf coordinates; false if the VIC or TensorRT failed
+static bool detect_frame(NvBufSurface *surf, int b, float scale, NvBufSurface *dst, std::vector<Face> &faces) {
+  if (!det_prepare(surf, b, scale, dst) || !live_det.run()) return false;
+  faces = decode_scrfd([](const char *name) { return live_det.out(name); }, 1.f / scale);
+  return true;
+}
+
+static void add_faces(NvDsBatchMeta *bm, NvDsFrameMeta *fm, const std::vector<Face> &faces, int fw, int fh) {
   for (auto &f : faces) {
     float l = std::max(0.f, f.x1), t = std::max(0.f, f.y1);
-    float w = std::min((float)mux_w, f.x2) - l, h = std::min((float)mux_h, f.y2) - t;
+    float w = std::min((float)fw, f.x2) - l, h = std::min((float)fh, f.y2) - t;
     if (w <= 0 || h <= 0) continue;
     NvDsObjectMeta *o = nvds_acquire_obj_meta_from_pool(bm);
     o->unique_component_id = 1;
@@ -901,48 +1055,68 @@ static void add_faces(NvDsBatchMeta *bm, NvDsFrameMeta *fm, const std::vector<Fa
   }
 }
 
+static int cam_of(const NvDsFrameMeta *fm) { return fm->source_id < (guint)n_cams ? (int)fm->source_id : 0; }
+static std::string cam_label(int c) { return n_cams > 1 ? cams[c].name + ": " : ""; }
+
+// Detection budget (D-039): one SCRFD run per batch. Two cameras both due take turns (about 7.5 detections/s each at 15
+// fps instead of 2 x 51 ms per batch, which would not keep up); an idle camera keeps its every-IDLE_STEP-th cadence.
 static GstPadProbeReturn detect_probe(GstPad *, GstPadProbeInfo *info, gpointer) {
-  static unsigned long long idle_n = 0;
   static long fails = 0;
-  static bool was_idle = false;
+  static unsigned rr = 0;
   GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
   NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(buf);
+  if (!bm) return GST_PAD_PROBE_OK;
   long now = steady_s();
-  bool idle = IDLE_AFTER > 0 && now - last_face_s >= IDLE_AFTER;
-  if (idle != was_idle) {
-    was_idle = idle;
-    if (idle) LOGI("no face for %d s: detecting every %d frame(s)", IDLE_AFTER, IDLE_STEP);
-    else LOGI("face seen: detecting every frame");
+  std::vector<NvDsFrameMeta *> due;
+  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
+    auto *fm = (NvDsFrameMeta *)l->data;
+    Cam &c = cams[cam_of(fm)];
+    bool idle = IDLE_AFTER > 0 && now - c.last_face_s >= IDLE_AFTER;
+    if (idle != c.was_idle) {
+      c.was_idle = idle;
+      if (idle) LOGI("%sno face for %d s: detecting every %d frame(s)", cam_label(cam_of(fm)).c_str(), IDLE_AFTER, IDLE_STEP);
+      else LOGI("%sface seen: detecting every frame", cam_label(cam_of(fm)).c_str());
+    }
+    if (detect_due(now, c.last_face_s, c.idle_n)) due.push_back(fm);
   }
-  if (!bm || !detect_due(now, last_face_s, idle_n)) return GST_PAD_PROBE_OK;
+  if (due.empty()) return GST_PAD_PROBE_OK;
+  if (due.size() > 1) due.assign(1, due[rr++ % due.size()]);
   GstMapInfo mi;
   if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) return GST_PAD_PROBE_OK;
   auto *surf = (NvBufSurface *)mi.data;
   float scale = std::min((float)NET_W / mux_w, (float)NET_H / mux_h);
-  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
-    auto *fm = (NvDsFrameMeta *)l->data;
-    if (!det_prepare(surf, fm->batch_id, scale) || !live_det.run()) {
+  for (auto *fm : due) {
+    std::vector<Face> faces;
+    bool ok;
+    live_waiting++;
+    {
+      std::lock_guard<std::mutex> lk(det_mu);
+      live_waiting--;
+      ok = detect_frame(surf, fm->batch_id, scale, det_in, faces);
+    }
+    det_cv.notify_all();
+    if (!ok) {
       if (fails++ % 1000 == 0) LOGW("detection failed (%ld frames so far); those frames pass without faces", fails);
       continue;
     }
     n_detects++;
     fm->bInferDone = TRUE;  // without it nvtracker ignores this frame's detections
-    auto faces = decode_scrfd([](const char *name) { return live_det.out(name); }, 1.f / scale);
+    Cam &c = cams[cam_of(fm)];
     if (!faces.empty()) {
-      last_face_s = now;
-      if (was_idle) { was_idle = false; LOGI("face seen: detecting every frame"); }
+      c.last_face_s = now;
+      if (c.was_idle) { c.was_idle = false; LOGI("%sface seen: detecting every frame", cam_label(cam_of(fm)).c_str()); }
     }
-    add_faces(bm, fm, faces);
+    add_faces(bm, fm, faces, mux_w, mux_h);
   }
   gst_buffer_unmap(buf, &mi);
   return GST_PAD_PROBE_OK;
 }
 
 // true if this track should get a (new) recognition attempt now; marks it pending
-static bool want_attempt(guint64 id, int frame) {
+static bool want_attempt(const TKey &k, int frame) {
   std::lock_guard<std::mutex> lk(st_mu);
   if (tracks.size() > 100000) tracks.clear();
-  auto &s = tracks[id];
+  auto &s = tracks[k];
   if (s.done || s.pending || frame - s.last_frame < RETRY_GAP) return false;
   s.pending = true;
   s.tries++;
@@ -950,24 +1124,33 @@ static bool want_attempt(guint64 id, int frame) {
   return true;
 }
 
-// on-screen box + label for nvdsosd: green name, red Unknown, amber while recognizing
-static void label(NvDsObjectMeta *o, GstClockTime pts) {
-  std::string txt = "Recognizing...";
-  double r = 0.96, g = 0.62, b = 0.04;
+// on-screen box + label for nvdsosd: green name, red Unknown, amber while recognizing; true if the decided label is on
+static void draw_label(NvDsObjectMeta *o, const TrackState *s);
+static bool label(NvDsObjectMeta *o, const TKey &k) {
+  TrackState s;
+  bool decided = false;
   {
     std::lock_guard<std::mutex> lk(st_mu);
-    if (GST_CLOCK_TIME_IS_VALID(pts)) last_label_pts = pts;
-    auto it = o->object_id == UNTRACKED_OBJECT_ID ? tracks.end() : tracks.find(o->object_id);
-    if (it != tracks.end() && it->second.done) {
-      if (it->second.name == "unknown") { txt = "Unknown"; r = 0.85; g = 0.18; b = 0.15; }
-      else {
-        char sc[16];
-        snprintf(sc, sizeof sc, "  %.2f", it->second.score);
-        txt = it->second.name;
-        std::replace(txt.begin(), txt.end(), '_', ' ');
-        txt += sc;
-        r = 0.1; g = 0.62; b = 0.33;
-      }
+    auto it = o->object_id == UNTRACKED_OBJECT_ID ? tracks.end() : tracks.find(k);
+    if (it != tracks.end() && it->second.done) { decided = true; s = it->second; }
+  }
+  draw_label(o, decided ? &s : nullptr);
+  return decided;
+}
+
+// s: the decided state, or nullptr while recognizing
+static void draw_label(NvDsObjectMeta *o, const TrackState *s) {
+  std::string txt = "Recognizing...";
+  double r = 0.96, g = 0.62, b = 0.04;
+  if (s) {
+    if (s->name == "unknown") { txt = "Unknown"; r = 0.85; g = 0.18; b = 0.15; }
+    else {
+      char sc[16];
+      snprintf(sc, sizeof sc, "  %.2f", s->score);
+      txt = s->name;
+      std::replace(txt.begin(), txt.end(), '_', ' ');
+      txt += sc;
+      r = 0.1; g = 0.62; b = 0.33;
     }
   }
   auto &rp = o->rect_params;
@@ -992,16 +1175,28 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
   NvBufSurface *surf = nullptr;
   bool mapped = false;
   GstMapInfo mi;
+  std::vector<TKey> shown;  // tracks whose decided label is in this batch, on a fresh frame of their camera
+  long now = steady_s();
   for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
     auto *fm = (NvDsFrameMeta *)l->data;
+    int ci = cam_of(fm);
+    Cam &c = cams[ci];
     n_frames++;
+    c.frames++;
+    long gap = now - c.last_frame_s;
+    if (c.last_frame_s && gap > 3) {  // the camera was gone: results for its old tracks must not label new ones
+      c.gen++;
+      LOGI("%scamera back after %ld s", cam_label(ci).c_str(), gap);
+    }
+    c.last_frame_s = now;
     for (NvDsMetaList *ol = fm->obj_meta_list; ol; ol = ol->next) {
       auto *o = (NvDsObjectMeta *)ol->data;
       n_faces++;
-      label(o, GST_BUFFER_PTS(buf));
+      TKey k{ci, c.gen, o->object_id};
+      if (label(o, k)) shown.push_back(k);
       float kps[10];
       if (o->object_id == UNTRACKED_OBJECT_ID || o->rect_params.width < MIN_FACE_PX || !unpack_kps(o, kps)) continue;
-      if (!want_attempt(o->object_id, fm->frame_num)) continue;
+      if (!want_attempt(k, fm->frame_num)) continue;
       if (!surf) {
         if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) return GST_PAD_PROBE_OK;
         surf = (NvBufSurface *)mi.data;
@@ -1015,7 +1210,7 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
       auto &p = surf->surfaceList[b];
       cv::Mat rgba(p.height, p.width, CV_8UC4, p.mappedAddr.addr[0], p.pitch), face;
       cv::cvtColor(align(rgba, kps), face, cv::COLOR_RGBA2RGB);
-      Job j{o->object_id, fm->frame_num,
+      Job j{k, fm->frame_num,
             {o->rect_params.left, o->rect_params.top, o->rect_params.left + o->rect_params.width,
              o->rect_params.top + o->rect_params.height, o->confidence}, face};
       bool queued = false;
@@ -1027,16 +1222,338 @@ static GstPadProbeReturn tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer
       else {
         n_dropped++;
         std::lock_guard<std::mutex> lk(st_mu);
-        tracks[o->object_id].pending = false;  // let the track try again later
+        tracks[k].pending = false;  // let the track try again later
       }
     }
     if (mapped) { NvBufSurfaceUnMap(surf, fm->batch_id, 0); mapped = false; }
   }
   if (surf) gst_buffer_unmap(buf, &mi);
+  if (!shown.empty()) certify_batch(shown, GST_BUFFER_PTS(buf));
+  return GST_PAD_PROBE_OK;
+}
+
+// two cameras: a camera without frames for 3 s gets "<name>: offline" on its tile (the tiler repeats its last picture)
+static GstPadProbeReturn offline_probe(GstPad *, GstPadProbeInfo *info, gpointer) {
+  NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(GST_PAD_PROBE_INFO_BUFFER(info));
+  if (!bm || !bm->frame_meta_list) return GST_PAD_PROBE_OK;
+  long now = steady_s();
+  for (int i = 0; i < n_cams; i++) {
+    if (now - cams[i].last_frame_s <= 3) continue;
+    NvDsDisplayMeta *d = nvds_acquire_display_meta_from_pool(bm);
+    NvOSD_TextParams &t = d->text_params[0];
+    d->num_labels = 1;
+    t.display_text = g_strdup((cams[i].name + ": offline").c_str());
+    t.x_offset = i * (TILE_W / n_cams) + 20;
+    t.y_offset = 20;
+    t.font_params.font_name = (char *)"Sans";
+    t.font_params.font_size = 18;
+    t.font_params.font_color = {1.0, 1.0, 1.0, 1.0};
+    t.set_bg_clr = 1;
+    t.text_bg_clr = {0.85, 0.18, 0.15, 0.9};
+    nvds_add_display_meta_to_frame((NvDsFrameMeta *)bm->frame_meta_list->data, d);
+  }
   return GST_PAD_PROBE_OK;
 }
 
 static guint frame_step();
+
+// ---- uploads (D-039): data/uploads/<id>/ holds input (the video), meta.json (from the website: width, height, duration
+// of the checked file), state (queued, processing, done, failed, cancelled), reason, progress.json, result.mp4 and
+// result.json. One job at a time; the GPU-batch lock (data/gpu-batch.lock, also taken by enrollment) is held for the whole
+// job. A job found "processing" at start was interrupted (stop or crash) and is failed, never retried: a file that crashes
+// the process cannot crash it twice (owner accepted the risk of one restart, 2026-11-07).
+static const double UPLOAD_MAX_S = 1800;            // 30 minutes
+static const long long UPLOAD_RESERVE = 2LL << 30;  // free space kept on the data partition
+struct Upload {
+  std::string dir;
+  unsigned seq = 0;
+  int w = 0, h = 0;
+  NvBufSurface *det_in = nullptr;
+  std::atomic<bool> abort{false}, waiting{false};
+  std::atomic<long> pos_ms{0};
+};
+
+static std::string read_file(const std::string &p) {
+  std::ifstream f(p);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+static void write_atomic(const std::string &p, const std::string &s) {
+  std::string tmp = p + ".tmp";
+  if (FILE *f = fopen(tmp.c_str(), "w")) {
+    fwrite(s.data(), 1, s.size(), f);
+    fclose(f);
+    rename(tmp.c_str(), p.c_str());
+  }
+}
+static double json_num(const std::string &s, const char *key) {
+  size_t i = s.find("\"" + std::string(key) + "\":");
+  return i == std::string::npos ? -1 : std::atof(s.c_str() + i + strlen(key) + 3);
+}
+static std::string trim(std::string s) {
+  while (!s.empty() && isspace((unsigned char)s.back())) s.pop_back();
+  return s;
+}
+
+// detection for an upload frame: only while every live camera is idle and no live detection waits; checked again under
+// det_mu so a live caller that arrived meanwhile goes first. Every upload frame is detected (no idle cadence).
+static GstPadProbeReturn upload_detect_probe(GstPad *, GstPadProbeInfo *info, gpointer p) {
+  auto *u = (Upload *)p;
+  GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+  NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(buf);
+  GstMapInfo mi;
+  if (!bm || u->abort || !gst_buffer_map(buf, &mi, GST_MAP_READ)) return GST_PAD_PROBE_OK;
+  auto *surf = (NvBufSurface *)mi.data;
+  float scale = std::min((float)NET_W / u->w, (float)NET_H / u->h);
+  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
+    auto *fm = (NvDsFrameMeta *)l->data;
+    std::vector<Face> faces;
+    bool ok = false;
+    {
+      std::unique_lock<std::mutex> lk(det_mu);
+      while (!u->abort && !(live_waiting == 0 && live_idle(steady_s()))) {
+        u->waiting = true;
+        det_cv.wait_for(lk, std::chrono::milliseconds(200));
+      }
+      u->waiting = false;
+      if (!u->abort) ok = detect_frame(surf, fm->batch_id, scale, u->det_in, faces);
+    }
+    det_cv.notify_all();
+    if (ok) {
+      fm->bInferDone = TRUE;
+      add_faces(bm, fm, faces, u->w, u->h);
+    }
+  }
+  gst_buffer_unmap(buf, &mi);
+  return GST_PAD_PROBE_OK;
+}
+
+// recognition for an upload: queue new tracks' faces, wait until they are recognized (offline, so the frame can wait and
+// carries the names; nothing is left over at the end), then label every face
+static GstPadProbeReturn upload_tracker_probe(GstPad *, GstPadProbeInfo *info, gpointer p) {
+  auto *u = (Upload *)p;
+  GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+  NvDsBatchMeta *bm = gst_buffer_get_nvds_batch_meta(buf);
+  if (!bm) return GST_PAD_PROBE_OK;
+  double t = GST_BUFFER_PTS_IS_VALID(buf) ? GST_BUFFER_PTS(buf) / 1e9 : 0;
+  u->pos_ms = (long)(t * 1000);
+  GstMapInfo mi;
+  NvBufSurface *surf = nullptr;
+  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next) {
+    auto *fm = (NvDsFrameMeta *)l->data;
+    bool mapped = false;
+    for (NvDsMetaList *ol = fm->obj_meta_list; ol; ol = ol->next) {
+      auto *o = (NvDsObjectMeta *)ol->data;
+      float kps[10];
+      if (u->abort || o->object_id == UNTRACKED_OBJECT_ID || o->rect_params.width < MIN_FACE_PX || !unpack_kps(o, kps)) continue;
+      {
+        std::lock_guard<std::mutex> lk(st_mu);
+        auto &s = upl_tracks[o->object_id].s;
+        if (s.done || s.pending || fm->frame_num - s.last_frame < RETRY_GAP) continue;
+        s.pending = true; s.tries++; s.last_frame = fm->frame_num;
+        upl_pending++;
+      }
+      if (!surf) {
+        if (!gst_buffer_map(buf, &mi, GST_MAP_READ)) break;
+        surf = (NvBufSurface *)mi.data;
+      }
+      int b = fm->batch_id;
+      if (!mapped) {
+        if (NvBufSurfaceMap(surf, b, 0, NVBUF_MAP_READ) != 0) break;
+        NvBufSurfaceSyncForCpu(surf, b, 0);
+        mapped = true;
+      }
+      auto &sp = surf->surfaceList[b];
+      cv::Mat rgba(sp.height, sp.width, CV_8UC4, sp.mappedAddr.addr[0], sp.pitch), face;
+      cv::cvtColor(align(rgba, kps), face, cv::COLOR_RGBA2RGB);
+      Job j{TKey{-1, u->seq, o->object_id}, fm->frame_num,
+            {o->rect_params.left, o->rect_params.top, o->rect_params.left + o->rect_params.width,
+             o->rect_params.top + o->rect_params.height, o->confidence}, face};
+      {
+        std::lock_guard<std::mutex> lk(q_mu);
+        q_upl.push_back(std::move(j));
+      }
+      q_cv.notify_one();
+    }
+    if (mapped) NvBufSurfaceUnMap(surf, fm->batch_id, 0);
+  }
+  if (surf) gst_buffer_unmap(buf, &mi);
+  {
+    std::unique_lock<std::mutex> lk(st_mu);
+    upl_cv.wait_for(lk, std::chrono::seconds(5), [u] { return upl_pending <= 0 || u->abort; });
+  }
+  for (NvDsMetaList *l = bm->frame_meta_list; l; l = l->next)
+    for (NvDsMetaList *ol = ((NvDsFrameMeta *)l->data)->obj_meta_list; ol; ol = ol->next) {
+      auto *o = (NvDsObjectMeta *)ol->data;
+      TrackState s;
+      bool decided = false;
+      {
+        std::lock_guard<std::mutex> lk(st_mu);
+        auto it = upl_tracks.find(o->object_id);
+        if (o->object_id != UNTRACKED_OBJECT_ID && it != upl_tracks.end() && it->second.s.done) {
+          decided = true;
+          s = it->second.s;
+          if (it->second.first < 0) it->second.first = t;
+          it->second.last = t;
+        }
+      }
+      draw_label(o, decided ? &s : nullptr);
+    }
+  return GST_PAD_PROBE_OK;
+}
+
+// runs one upload; "" when result.mp4 is complete, else the reason ("cancelled" when the owner cancelled)
+static std::string run_upload(Upload &u) {
+  std::string meta = read_file(u.dir + "/meta.json");
+  double w = json_num(meta, "width"), h = json_num(meta, "height"), dur = json_num(meta, "duration");
+  if (w < 16 || h < 16 || w > 1920 || h > 1080 || dur <= 0 || dur > UPLOAD_MAX_S)
+    return "only videos up to 1920x1080 and 30 minutes are processed";
+  u.w = (int)w & ~1; u.h = (int)h & ~1;
+  if (!(u.det_in = det_surface())) return "no GPU memory for the detector input";
+  std::string dir = env("FACEPIPE_DIR", ".");
+  std::string desc =
+      "uridecodebin name=dec uri=file://" + u.dir + "/input ! queue max-size-buffers=4 ! m.sink_0 "
+      "nvstreammux name=m batch-size=1 live-source=0 enable-padding=1 width=" + std::to_string(u.w) +
+      " height=" + std::to_string(u.h) + " ! nvvideoconvert ! capsfilter name=uc caps=\"video/x-raw(memory:NVMM),format=RGBA\" ! "
+      "nvtracker name=ut ll-lib-file=/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_nvmultiobjecttracker.so "
+      "ll-config-file=" + dir + "/tracker.yml tracker-width=640 tracker-height=384 ! nvdsosd ! nvvideoconvert ! "
+      "capsfilter caps=\"video/x-raw(memory:NVMM),format=NV12\" ! nvv4l2h264enc bitrate=4000000 bufapi-version=true ! "
+      "h264parse ! qtmux ! filesink sync=false location=\"" + u.dir + "/result.mp4.tmp\"";
+  GError *err = nullptr;
+  GstElement *p = gst_parse_launch(desc.c_str(), &err);
+  if (!p) {
+    std::string e = err ? err->message : "?";
+    if (err) g_error_free(err);
+    NvBufSurfaceDestroy(u.det_in);
+    return "the processing pipeline could not be built (" + e + ")";
+  }
+  for (auto pr : {std::make_pair("uc", upload_detect_probe), std::make_pair("ut", upload_tracker_probe)}) {
+    GstElement *e = gst_bin_get_by_name(GST_BIN(p), pr.first);
+    GstPad *sp = gst_element_get_static_pad(e, "src");
+    gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_BUFFER, pr.second, &u, nullptr);
+    gst_object_unref(sp);
+    gst_object_unref(e);
+  }
+  // the result is bounded: about 4 Mb/s, x1.5 for rate-control peaks and the container, plus 50 MB
+  long long cap = (long long)(dur * 4e6 / 8 * 1.5) + (50LL << 20);
+  double deadline = steady_s() + 3 * dur + 120;  // plus the time spent waiting for live
+  gst_element_set_state(p, GST_STATE_PLAYING);
+  GstBus *bus = gst_element_get_bus(p);
+  std::string why;
+  long last_check = 0;
+  while (true) {
+    GstMessage *m = gst_bus_timed_pop_filtered(bus, GST_SECOND / 2, (GstMessageType)(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+    if (m) {
+      if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_ERROR) {
+        GError *e; gchar *d;
+        gst_message_parse_error(m, &e, &d);
+        why = std::string("the video could not be processed (") + e->message + ")";
+        g_error_free(e); g_free(d);
+      }
+      gst_message_unref(m);
+      break;
+    }
+    if (u.waiting) deadline += 0.5;
+    long now = steady_s();
+    struct stat st;
+    if (stopping) why = "the service stopped before it finished; upload the video again";
+    else if (access((u.dir + "/cancel").c_str(), F_OK) == 0) why = "cancelled";
+    else if (now > deadline) why = "processing took too long";
+    else if (now - last_check >= 2) {
+      last_check = now;
+      struct statvfs v;
+      if (statvfs(u.dir.c_str(), &v) == 0 && (long long)v.f_bavail * v.f_frsize < UPLOAD_RESERVE) why = "the disk is almost full";
+      else if (stat((u.dir + "/result.mp4.tmp").c_str(), &st) == 0 && st.st_size > cap) why = "the result grew too large";
+      char b[128];
+      snprintf(b, sizeof b, "{\"state\":\"%s\",\"pos\":%.1f,\"duration\":%.1f}", u.waiting ? "waiting" : "processing",
+               u.pos_ms / 1000.0, dur);
+      write_atomic(u.dir + "/progress.json", b);
+    }
+    if (!why.empty()) break;
+  }
+  u.abort = true;  // probes stop waiting
+  det_cv.notify_all();
+  upl_cv.notify_all();
+  gst_element_set_state(p, GST_STATE_NULL);
+  gst_object_unref(bus);
+  gst_object_unref(p);
+  NvBufSurfaceDestroy(u.det_in);
+  return why;
+}
+
+static void upload_thread() {
+  std::string root = DATA_DIR + "/uploads";
+  auto ids = [&root] {
+    std::vector<std::string> v;
+    if (DIR *d = opendir(root.c_str())) {
+      while (dirent *e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n.size() == 16 && n.find_first_not_of("0123456789abcdef") == std::string::npos) v.push_back(n);
+      }
+      closedir(d);
+    }
+    return v;
+  };
+  for (auto &id : ids())  // interrupted by a stop or a crash: failed, never retried
+    if (trim(read_file(root + "/" + id + "/state")) == "processing") {
+      write_atomic(root + "/" + id + "/reason", "interrupted: the service stopped or restarted while processing it; upload it again");
+      write_atomic(root + "/" + id + "/state", "failed");
+      LOGW("upload %s: interrupted earlier, marked failed", id.c_str());
+    }
+  while (!stopping) {
+    for (int i = 0; i < 20 && !stopping; i++) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::string pick;
+    double oldest = 1e18;
+    for (auto &id : ids()) {
+      std::string d = root + "/" + id;
+      double c = json_num(read_file(d + "/meta.json"), "created");
+      if (trim(read_file(d + "/state")) == "queued" && c < oldest) { oldest = c; pick = id; }
+    }
+    if (pick.empty() || stopping) continue;
+    int fd = open((DATA_DIR + "/gpu-batch.lock").c_str(), O_CREAT | O_RDWR, 0600);
+    if (fd < 0) continue;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); continue; }  // an enrollment is running
+    std::string d = root + "/" + pick;
+    if (trim(read_file(d + "/state")) == "queued" && access((d + "/cancel").c_str(), F_OK) != 0) {
+      write_atomic(d + "/state", "processing");
+      Upload u;
+      u.dir = d;
+      {
+        std::lock_guard<std::mutex> lk(st_mu);
+        upl_tracks.clear();
+        upl_pending = 0;
+        u.seq = ++upl_seq;
+      }
+      LOGI("upload %s: processing", pick.c_str());
+      std::string why = run_upload(u);
+      if (why.empty()) {
+        std::string res = "[";
+        {
+          std::lock_guard<std::mutex> lk(st_mu);
+          for (auto &kv : upl_tracks) {
+            if (!kv.second.s.done || kv.second.first < 0) continue;
+            char b[64];
+            snprintf(b, sizeof b, ",\"score\":%.3f,\"first\":%.1f,\"last\":%.1f}", kv.second.s.score, kv.second.first, kv.second.last);
+            res += std::string(res.size() > 1 ? "," : "") + "{\"track\":" + std::to_string(kv.first) + ",\"name\":" +
+                   json_str(kv.second.s.name) + b;
+          }
+        }
+        write_atomic(d + "/result.json", res + "]\n");
+        rename((d + "/result.mp4.tmp").c_str(), (d + "/result.mp4").c_str());
+        write_atomic(d + "/state", "done");
+        LOGI("upload %s: done", pick.c_str());
+      } else {
+        unlink((d + "/result.mp4.tmp").c_str());
+        if (why != "cancelled") write_atomic(d + "/reason", why);
+        write_atomic(d + "/state", why == "cancelled" ? "cancelled" : "failed");
+        LOGW("upload %s: %s", pick.c_str(), why.c_str());
+      }
+    }
+    flock(fd, LOCK_UN);
+    close(fd);
+  }
+}
 
 static gboolean report(gpointer) {
   static long last = 0, last_det = 0;
@@ -1049,15 +1566,26 @@ static gboolean report(gpointer) {
   last_det = n_detects;
   static int calls = 0;
   if (calls++ % 12 == 0)  // one log line a minute; status.json every 5 s
-    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld repeats %ld", fps, dps, f,
-         (long)n_faces, (long)n_known, (long)n_unknown, (long)n_dropped, (long)n_repeats);
+    LOGI("fps %.1f detections/s %.1f frames %ld faces %ld known %ld unknown %ld dropped %ld repeats %ld stale %ld", fps, dps,
+         f, (long)n_faces, (long)n_known, (long)n_unknown, (long)n_dropped, (long)n_repeats, (long)n_stale);
   last = f; t = now;
+  static long last_cf[MAX_CAMS] = {0};
+  std::string cj;
+  long s_now = steady_s();
+  for (int i = 0; i < n_cams; i++) {
+    long cf = cams[i].frames;
+    char b[96];
+    snprintf(b, sizeof b, "%s{\"id\":%s,\"name\":%s,\"fps\":%.1f,\"up\":%s}", i ? "," : "", json_str(cams[i].id).c_str(),
+             json_str(cams[i].name).c_str(), (cf - last_cf[i]) / dt, s_now - cams[i].last_frame_s <= 3 ? "true" : "false");
+    cj += b;
+    last_cf[i] = cf;
+  }
   // status.json for the web page (written to a temp file, then renamed so readers never see half a file)
   std::string tmp = DATA_DIR + "/status.json.tmp";
   if (FILE *s = fopen(tmp.c_str(), "w")) {
     fprintf(s, "{\"version\":\"%s\",\"updated\":%ld,\"fps\":%.1f,\"det_fps\":%.1f,\"frames\":%ld,\"known\":%ld,\"unknown\":%ld,"
-               "\"step\":%u}\n",
-            FACEPIPE_VERSION, (long)time(nullptr), fps, dps, f, (long)n_known, (long)n_unknown, frame_step());
+               "\"step\":%u,\"cameras\":[%s]}\n",
+            FACEPIPE_VERSION, (long)time(nullptr), fps, dps, f, (long)n_known, (long)n_unknown, frame_step(), cj.c_str());
     fclose(s);
     rename(tmp.c_str(), (DATA_DIR + "/status.json").c_str());
   }
@@ -1092,9 +1620,18 @@ static guint frame_step() {
   return v;
 }
 
-static GstPadProbeReturn drop_probe(GstPad *, GstPadProbeInfo *, gpointer) {
-  static guint64 n = 0;
+static guint64 drop_n[MAX_CAMS];
+static GstPadProbeReturn drop_probe(GstPad *, GstPadProbeInfo *, gpointer cam) {
+  guint64 &n = drop_n[GPOINTER_TO_INT(cam)];
   return (n++ % frame_step()) ? GST_PAD_PROBE_DROP : GST_PAD_PROBE_OK;
+}
+
+// nvurisrcbin (two cameras): link its video pad to the camera's mux pad
+static void on_cam_pad(GstElement *, GstPad *pad, gpointer mux_sink) {
+  gchar *n = gst_pad_get_name(pad);
+  if (g_str_has_prefix(n, "vsrc") && !gst_pad_is_linked((GstPad *)mux_sink) && gst_pad_link(pad, (GstPad *)mux_sink) != GST_PAD_LINK_OK)
+    LOGE("camera link failed");
+  g_free(n);
 }
 
 // Sources: rtsp://, file://, http(s):// -> uridecodebin (NVDEC);
@@ -1119,14 +1656,27 @@ static std::string camera_desc(const std::string &uri, int w, int h) {
          " ! jpegparse ! nvv4l2decoder mjpeg=1";
 }
 
+// index of the camera source (nvurisrcbin "cam<i>") that m comes from, or -1
+static int msg_cam(GstMessage *m) {
+  for (GstObject *o = GST_MESSAGE_SRC(m); o; o = GST_OBJECT_PARENT(o)) {
+    const char *n = GST_OBJECT_NAME(o);
+    if (n && !strncmp(n, "cam", 3) && n[3] >= '0' && n[3] < '0' + MAX_CAMS && !n[4]) return n[3] - '0';
+  }
+  return -1;
+}
+
 static gboolean on_bus(GstBus *, GstMessage *m, gpointer loop) {
   if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_EOS) { LOGI("end of stream"); g_main_loop_quit((GMainLoop *)loop); }
   else if (GST_MESSAGE_TYPE(m) == GST_MESSAGE_ERROR) {
     GError *e; gchar *d;
     gst_message_parse_error(m, &e, &d);
-    LOGE("%s: %s (%s)", GST_OBJECT_NAME(m->src), e->message, d ? d : "");
+    int c = n_cams > 1 ? msg_cam(m) : -1;
+    // two cameras: an error inside one camera's source is that camera's problem; nvurisrcbin reconnects it and the other
+    // camera keeps running. Any other error (mux, tracker, encoders) still ends the process for a clean restart.
+    if (c >= 0) LOGW("%scamera error: %s (the other camera keeps running)", cam_label(c).c_str(), e->message);
+    else LOGE("%s: %s (%s)", GST_OBJECT_NAME(m->src), e->message, d ? d : "");
     g_error_free(e); g_free(d);
-    g_main_loop_quit((GMainLoop *)loop);
+    if (c < 0) g_main_loop_quit((GMainLoop *)loop);
   }
   return TRUE;
 }
@@ -1290,9 +1840,32 @@ static int selftest() {
     std::vector<float> u(512, 0.f), v(512, 0.f);
     u[0] = 1.f; v[1] = 1.f;
     METRIC_L2 = false;
-    assert(!repeat("a", u, 1000) && repeat("a", v, 1299) && !repeat("b", u, 1299) && !repeat("a", u, 1300));
-    assert(!repeat("unknown", u, 2000) && repeat("unknown", u, 2100) && !repeat("unknown", v, 2100));
+    assert(!repeat("c", "a", u, 1000) && repeat("c", "a", v, 1299) && !repeat("c", "b", u, 1299) && !repeat("c", "a", u, 1300));
+    assert(!repeat("c", "unknown", u, 2000) && repeat("c", "unknown", u, 2100) && !repeat("c", "unknown", v, 2100));
+    assert(!repeat("d", "a", u, 2100) && repeat("d", "a", u, 2101));  // per camera (D-039): "a" was at camera c only
     logged.clear();
+  }
+  {  // cameras.active lines (D-039): legacy "<uri> <w> <h>", and with id and a name that has spaces
+    Cam a, b;
+    bool ok_a = parse_cam_line("rtsp://h/x 1280 720", a), ok_b = parse_cam_line("rtsp://h/y 1920 1080 9f3a Main gate", b);
+    assert(ok_a && a.w == 1280 && a.id == "cam0" && a.name == "Camera");
+    assert(ok_b && b.id == "9f3a" && b.name == "Main gate" && b.h == 1080);
+    bool bad1 = parse_cam_line("rtsp://h/x", a), bad2 = parse_cam_line("", a), bad3 = parse_cam_line("rtsp://h/x 0 720", a);
+    assert(!bad1 && !bad2 && !bad3);
+  }
+  {  // evidence (D-039): only a JPEG of a batch that showed the decided label of that camera, generation and track
+    TKey k{1, 2, 7}, other_gen{1, 3, 7}, other_cam{0, 2, 7};
+    EvReq r;
+    r.key = k;
+    ev_reqs.push_back(&r);
+    unsigned char px[3] = {1, 2, 3};
+    certify_batch({other_cam}, 100);   // partial batch: only the other camera had a fresh frame
+    certify_batch({other_gen}, 101);   // the camera reconnected: same tracker id, new generation
+    certify_batch({}, 102);            // the track left the picture
+    assert(!offer_jpeg(100, px, 3) && !offer_jpeg(101, px, 3) && !offer_jpeg(102, px, 3) && !r.done);
+    certify_batch({other_cam, k}, 103);
+    assert(!offer_jpeg(104, px, 3) && offer_jpeg(103, px, 3) && r.done && r.jpg.size() == 3);
+    ev_reqs.clear();
   }
   METRIC_L2 = m; MATCH = c; L2_MATCH = l;
   struct tm t = {};  // Friday 6 November 2026, 21:41:07
@@ -1379,17 +1952,15 @@ int main(int argc, char **argv) {
   fprintf(stderr, "usage: %s <gallery_dir> | --check <photo> <out.jpg>\n", argv[0]);
   return 1;
 #else
-  // The camera chosen on the website's Cameras page (D-034): $FACEPIPE_CAMERAS, default data/cameras.active, one line
-  // "<uri> <width> <height>". It overrides the command line, so FACEPIPE_URI in facepipe.env is only the fallback.
-  {
-    std::ifstream cf(env("FACEPIPE_CAMERAS", DATA_DIR + "/cameras.active"));
-    std::string line;
-    if (cf && std::getline(cf, line)) {
-      std::istringstream ls(line);
-      int w = 0, h = 0;
-      ls >> cam_uri >> w >> h;
-      if (!cam_uri.empty() && w > 0 && h > 0) { mux_w = w; mux_h = h; }
-    }
+  // The cameras chosen on the website's Cameras page (D-034, D-039): $FACEPIPE_CAMERAS, default data/cameras.active, one
+  // line per camera "<uri> <width> <height> [<id> [<name>]]". They override the command line, so FACEPIPE_URI in
+  // facepipe.env is only the fallback.
+  int n_file = read_cameras(env("FACEPIPE_CAMERAS", DATA_DIR + "/cameras.active"));
+  if (n_file > 0) {
+    n_cams = n_file;
+    cam_uri = cams[0].uri;
+    mux_w = cams[0].w; mux_h = cams[0].h;
+    if (n_cams > 1) { mux_w = 1280; mux_h = 720; }  // one canvas for both, aspect kept by padding
   }
   if (argc < 2 && cam_uri.empty()) {
     fprintf(stderr, "usage: %s <rtsp://...|file://...|csi:0|usb:/dev/video0> [width height]\n"
@@ -1402,7 +1973,8 @@ int main(int argc, char **argv) {
   dup2(2, 1);
   std::string dir = env("FACEPIPE_DIR", ".");
   std::string uri = cam_uri.empty() ? argv[1] : cam_uri;
-  if (!cam_uri.empty()) LOGI("camera chosen on the website, %dx%d", mux_w, mux_h);  // the URI may hold a password: not logged
+  if (n_cams > 1) LOGI("cameras chosen on the website: %s and %s, %dx%d each", cams[0].name.c_str(), cams[1].name.c_str(), mux_w, mux_h);
+  else if (!cam_uri.empty()) LOGI("camera chosen on the website, %dx%d", mux_w, mux_h);  // the URI may hold a password: not logged
   bool camera = uri.rfind("csi:", 0) == 0 || uri.rfind("usb:", 0) == 0;
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
   LOGI("version %s, processing every %u frame(s), match %s %s %.2f, data %s", FACEPIPE_VERSION,
@@ -1413,11 +1985,15 @@ int main(int argc, char **argv) {
   LOGI("detection: every frame; after %d s without a face every %d frame(s)%s", IDLE_AFTER, IDLE_STEP,
        IDLE_AFTER > 0 ? "" : " (idle mode off)");
   std::thread worker(rec_worker);
+  std::thread uploads(upload_thread);
 
   GMainLoop *loop = g_main_loop_new(nullptr, FALSE);
   GstElement *pipe = gst_pipeline_new("facepipe");
-  GstElement *src;
-  if (camera) {
+  GstElement *src = nullptr, *tiler = nullptr;
+  if (n_cams > 1) {
+    tiler = make("nvmultistreamtiler", "tiler");
+    g_object_set(tiler, "rows", 1, "columns", n_cams, "width", TILE_W, "height", TILE_H, nullptr);
+  } else if (camera) {
     std::string d = camera_desc(uri, mux_w, mux_h);
     LOGI("camera: %s", d.c_str());
     GError *err = nullptr;
@@ -1466,25 +2042,46 @@ int main(int argc, char **argv) {
   g_signal_connect(sh, "new-sample", G_CALLBACK(on_h264), nullptr);
   mkdir(LIVE_DIR.c_str(), 0755);
   LOGI("recordings %s: %s", REC_DIR.c_str(), rec_ok() ? "on" : "off (not mounted or not writable)");
-  g_object_set(mux, "batch-size", 1, "width", mux_w, "height", mux_h, "live-source", live,
+  g_object_set(mux, "batch-size", n_cams, "width", mux_w, "height", mux_h, "live-source", live,
                "batched-push-timeout", 40000, nullptr);
+  if (n_cams > 1) g_object_set(mux, "enable-padding", TRUE, nullptr);
   GstCaps *rgba = gst_caps_from_string("video/x-raw(memory:NVMM), format=RGBA");
   g_object_set(caps, "caps", rgba, nullptr);
   gst_caps_unref(rgba);
   g_object_set(trk, "ll-lib-file", "/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_nvmultiobjecttracker.so",
                "ll-config-file", (dir + "/tracker.yml").c_str(), "tracker-width", 640, "tracker-height", 384, nullptr);
-  gst_bin_add_many(GST_BIN(pipe), src, mux, conv, caps, trk, osd, t, qj, cj, fj, jenc, sj, qh, ch, fh, henc, hp, fh2,
+  gst_bin_add_many(GST_BIN(pipe), mux, conv, caps, trk, osd, t, qj, cj, fj, jenc, sj, qh, ch, fh, henc, hp, fh2,
                    te, qr, pay, us, qa, sh, nullptr);
-  GstPad *msink = gst_element_get_request_pad(mux, "sink_0");
-  gst_pad_add_probe(msink, GST_PAD_PROBE_TYPE_BUFFER, drop_probe, nullptr, nullptr);
-  if (camera) {
+  if (tiler) gst_bin_add(GST_BIN(pipe), tiler);
+  // two cameras: one nvurisrcbin each (TCP; it reconnects a camera whose data stops for 10 s on its own)
+  for (int i = 0; n_cams > 1 && i < n_cams; i++) {
+    std::string n = "cam" + std::to_string(i), pad = "sink_" + std::to_string(i);
+    GstElement *s = make("nvurisrcbin", n.c_str());
+    gst_util_set_object_arg(G_OBJECT(s), "type", "rtsp");
+    gst_util_set_object_arg(G_OBJECT(s), "select-rtp-protocol", "rtp-tcp");
+    g_object_set(s, "uri", cams[i].uri.c_str(), "rtsp-reconnect-interval", 10, "latency", 200, "source-id", i, nullptr);
+    gst_bin_add(GST_BIN(pipe), s);
+    GstPad *mp = gst_element_get_request_pad(mux, pad.c_str());
+    gst_pad_add_probe(mp, GST_PAD_PROBE_TYPE_BUFFER, drop_probe, GINT_TO_POINTER(i), nullptr);
+    g_signal_connect(s, "pad-added", G_CALLBACK(on_cam_pad), mp);
+  }
+  GstPad *msink = n_cams > 1 ? nullptr : gst_element_get_request_pad(mux, "sink_0");
+  if (msink) {
+    gst_bin_add(GST_BIN(pipe), src);
+    gst_pad_add_probe(msink, GST_PAD_PROBE_TYPE_BUFFER, drop_probe, GINT_TO_POINTER(0), nullptr);
+  }
+  if (!msink) {
+  } else if (camera) {
     GstPad *sp = gst_element_get_static_pad(src, "src");
     if (gst_pad_link(sp, msink) != GST_PAD_LINK_OK) { LOGE("camera link failed"); return 1; }
     gst_object_unref(sp);
   } else {
     g_signal_connect(src, "pad-added", G_CALLBACK(on_pad), msink);
   }
-  if (!gst_element_link_many(mux, conv, caps, trk, osd, t, nullptr) ||
+  // two cameras: crops are taken at the tracker (source coordinates), then the tiler composes, then OSD draws on it
+  bool linked = tiler ? gst_element_link_many(mux, conv, caps, trk, tiler, osd, t, nullptr)
+                      : gst_element_link_many(mux, conv, caps, trk, osd, t, nullptr);
+  if (!linked ||
       !gst_element_link_many(t, qj, cj, fj, jenc, sj, nullptr) ||
       !gst_element_link_many(t, qh, ch, fh, henc, hp, fh2, te, nullptr) ||
       !gst_element_link_many(te, qr, pay, us, nullptr) || !gst_element_link_many(te, qa, sh, nullptr)) {
@@ -1499,6 +2096,11 @@ int main(int argc, char **argv) {
   p = gst_element_get_static_pad(trk, "src");
   gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, tracker_probe, nullptr, nullptr);
   gst_object_unref(p);
+  if (tiler) {
+    p = gst_element_get_static_pad(tiler, "src");
+    gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, offline_probe, nullptr, nullptr);
+    gst_object_unref(p);
+  }
 
   GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(pipe));
   gst_bus_add_watch(bus, on_bus, loop);
@@ -1518,6 +2120,7 @@ int main(int argc, char **argv) {
   report(nullptr);
   { std::lock_guard<std::mutex> lk(q_mu); q_stop = true; }
   q_cv.notify_all();
+  uploads.join();  // a running upload stops within about 1 s and is marked failed
   worker.join();  // queued faces are still matched and logged as attendance; no new clips or evidence (stopping)
   { std::lock_guard<std::mutex> lk(v_mu); if (clip.pipe) clip_finish(); }
   while (clips_finalizing > 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));

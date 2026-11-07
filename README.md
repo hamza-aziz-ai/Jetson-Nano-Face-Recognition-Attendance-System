@@ -50,15 +50,16 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 
 | Area | What it does |
 | --- | --- |
-| 🎥 **Video sources** | Chosen on the website's Cameras page: RTSP/IP cameras (several set up, tested and enabled from the page; forced to TCP), **USB** cameras (MJPEG decoded on NVJPG), **CSI** cameras through the Argus ISP; video files from the command line |
+| 🎥 **Video sources** | Chosen on the website's Cameras page: RTSP/IP cameras (several set up and tested from the page, up to two running at once in one process; forced to TCP), **USB** cameras (MJPEG decoded on NVJPG), **CSI** cameras through the Argus ISP; video files from the command line |
 | 🔍 **Detection** | SCRFD-10G at 640x384 in TensorRT FP16 with a custom decoder for boxes and 5 facial landmarks; adaptive rate: full rate while faces are present, every 6th frame when the scene is empty |
 | 🧭 **Tracking** | NvMultiObjectTracker (IOU): one recognition per person per visit, not per frame |
 | 🧠 **Recognition** | Umeyama alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine or L2 matching; unknown tracks retried up to 5 times |
 | 👤 **Enrollment** | Registration by invitation link from any phone on the network, with consent and admin approval; or photos in `gallery/<name>/` and one command. The running service picks up the new gallery by itself |
 | 📋 **Attendance** | Per-day event log with first and last seen, sightings, match score and a face snapshot; CSV export |
+| 🎞️ **Video upload** | Recognition on a recorded video (H.264/H.265, up to 1080p and 30 min): annotated copy to download with the names found; live cameras always go first; never counted as attendance; deleted after 7 days |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
-| 🖥️ **Website** | Overview, Live, Attendance, People and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
+| 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
 | ⚙️ **Operations** | Device health on the website (temperatures, CPU/GPU load, fan, memory) with warnings; frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |
 
@@ -183,6 +184,8 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 | Embedding agreement with the InsightFace reference, same images | cosine 0.97-0.99 |
 | Live match of an enrolled person against their gallery | cosine 0.62-0.78 (threshold 0.5) |
 | Clean service stop (camera released, clip finalized) | 0.6 s |
+| Two cameras in one process (two connections to one 720p phone stream) | 14.4 fps each, 2.3 GB RAM in use (two separate processes: 3.45 GB, live fell to 8.8 fps) |
+| Video upload beside a live USB camera, 9 s clip | processed in 18 s; live stayed at 15 fps; RAM peak 2.46 GB |
 
 ## Reliability and operations
 
@@ -275,6 +278,8 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | Website and service control | ✅ 5 pages with real data; Stop, Start and Restart from the System page |
 | Cameras page | ✅ Camera taken from the page's file (video file, USB 1280x720); RTSP test against a phone camera |
 | Registration and approval | ✅ Real enrollment of an approved registration beside the live pipeline: 16.9 s; removal re-enrolls cleanly |
+| Two cameras at once | ✅ Two connections to one phone RTSP stream: 14.4 fps each, side-by-side evidence with labels, per-camera events; one camera broken at start, the other ran. ⏳ A camera coming back after an outage not yet tested |
+| Video upload | ✅ Upload, check, processing beside a live USB camera (15 fps kept) and download through a test website |
 
 ## Roadmap
 

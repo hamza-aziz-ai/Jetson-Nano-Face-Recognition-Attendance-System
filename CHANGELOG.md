@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-07
+
+### Added
+
+- Two network cameras at once (owner): enable up to two RTSP cameras on the Cameras page. One recognition process handles both (one detector and one recognizer in memory: 2.3 GB in use, against 3.45 GB for two separate processes); each camera reconnects on its own and the other keeps running. The live view, RTSP stream, clips and evidence frames show both side by side; a camera that is down is marked offline on the picture and on the Overview. Events record the camera, and the 5-minute rule applies per person per camera, as in the CCTV system (D-039).
+- Video upload (owner): a new Video upload page runs face recognition on a recorded video (H.264 or H.265, up to 1920x1080 and 30 minutes; 500 MB on the home network, 95 MB through the internet address) and offers the annotated copy for download, with the names found. Live cameras always go first: a video is processed while no one is in view. Uploaded videos never count as attendance and are deleted after 7 days (owner) (D-039).
+
+### Changed
+
+- Evidence frames are now taken only from a frame certified to show the decided name on that camera, not "the next frame"; with two cameras the next frame could be the other camera's (D-039, agreed with Codex in a council).
+- Enrollment and video processing never run at the same time (a shared lock); approving a registration during an upload asks to try again when it is done.
+
+### Fixed
+
+- `deploy/install.sh` ran the web self-test against the real `data/` folder, where the camera test deletes the camera setup; it now uses a temporary folder like `deploy.sh`.
+
 ## [1.8.1] - 2026-11-07
 
 ### Fixed
