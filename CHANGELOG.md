@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-07
+
+### Added
+
+- Recognition state shown very clearly (owner): while recognition is stopped, not running or without a camera picture, every page shows a red or amber banner saying so, with who stopped it and when ("Recognition is STOPPED. No attendance is recorded and the live view is off. Stopped by Hamza at 11:30 AM."). The System page shows the state in large type, and its Start, Stop and Restart buttons read "Starting…", "Stopping…" or "Restarting…" until the action is done. The web log names who started, stopped or restarted it.
+
 ## [1.10.1] - 2026-11-07
 
 ### Security

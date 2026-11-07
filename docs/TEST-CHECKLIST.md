@@ -32,6 +32,7 @@ The Release workflow reruns all CI jobs, checks tag = `VERSION` and a `CHANGELOG
 | Video upload end to end | upload a short H.264 clip on the Video upload page | state `done`, download `<name>-recognized.mp4`; live fps unchanged (seen 2026-11-07: 9 s clip in 18 s, live USB camera 15 fps) |
 | Users and roles | `python3 web.py --selftest` | `selftest ok` (D-040 cases: links, sign-in names, viewer 403 matrix, revocation, cooldown, closed on database failure; seen 2026-11-07 on the Nano) |
 | RTSP local network only | DESCRIBE from a laptop on the home network, then VLC on mobile data | `200 OK` at home (seen 2026-11-07); 403 from mobile data (to do) |
+| Recognition state banner | stop recognition on the System page, open any page | red banner "Recognition is STOPPED ... Stopped by <name> at <time>" on Overview and System (seen 2026-11-07 on a test instance) |
 | Enrollment | `./facepipe-enroll gallery` | `enrolled N photos of M people ... (0 skipped)` |
 | Live run | `FACEPIPE_DIR=. timeout -s INT 60 ./facepipe <source> 1920 1080` | `[facepipe] fps` near 15 with `FACEPIPE_DROP=2` on a 30 fps camera; known faces counted |
 | Embeddings vs reference | `python -I check_vs_rest.py <photos> <dir with faces.jsonl>` | Matching photos at cosine 0.96 or more |

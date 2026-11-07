@@ -6,6 +6,7 @@ All data lives on the device. None of it is in the repository.
 | --- | --- | --- | --- | --- |
 | Enrollment photos | `gallery/<name>/*.jpg\|png` | Images | Faces of enrolled people; `profile.jpg` is also the picture shown on the website | Until removed by hand |
 | Wanted service state | `data/desired` | `running` or `stopped` | Whether recognition was stopped on the website | Until changed on the website |
+| Last service action | `data/service-last.json` (0600) | JSON: action, by, at | Who started, stopped or restarted recognition on the website, and when | Overwritten by the next action |
 | Web log | `logs/<year>/<Month>/web.log` | Text lines | Failed logins and refused requests with the client address, service actions | Kept (no retention rule set by the owner) |
 | Pending registrations | `data/registrations/<id>/n.jpg` (0700) | JPEG, re-encoded, at most 1600 px | Faces of people who registered | Rejected: deleted at once; unreviewed: 7 days; approved: moved into `gallery/` |
 | Registration records | `data/web.db` | sqlite3 | Invitation hashes, names, consent version and time, status | Kept (no retention rule set) |
