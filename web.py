@@ -611,8 +611,28 @@ def health_html(h):
     mem_pct = 100.0 * used / m["total"] if m["total"] else 0
     fan = h["fan"]
     fan_txt = ("%d%% power%s" % (fan["pct"], ", %d rpm" % fan["rpm"] if fan.get("rpm") else " (no speed sensor)")) if fan else "no fan control"
-    banner = {"bad": "<div class='flash bad'>The device is very hot. Stop recognition on this page if it stays like this.</div>",
-              "warn": "<div class='flash warn'>The device is warm or short of memory; keep an eye on it.</div>"}.get(h["level"], "")
+    # name the reason: heat and low memory need different answers from whoever reads this, and on a device running only
+    # this software low memory is the rare one, so "warm or short of memory" sent the reader looking in the wrong place
+    hot_name, hot_c = max(h["temps"].items(), key=lambda kv: kv[1]) if h["temps"] else ("", 0)
+    heat = "%s is at %.0f &deg;C" % (esc(hot_name), hot_c)
+    # same test as device_health(): a machine that reports no figure is never called short of memory
+    low_mem = m["available"] is not None and m["total"] and m["available"] < LOW_MEM_MB
+    short = "%d MB of %d MB free" % (m["available"], m["total"]) if low_mem else ""
+    if h["level"] == "bad":
+        banner = ("<div class='flash bad'>Too hot: %s. The Nano is slowing itself down to cool off. Check the fan and that "
+                  "air can move around the case; stop recognition on this page if it stays like this.</div>" % heat)
+    elif h["level"] == "warn":
+        if hot_c >= WARN_C and low_mem:
+            why = "running hot (%s) and low on memory (%s)" % (heat, short)
+        elif hot_c >= WARN_C:
+            why = "running hot: %s" % heat
+        else:
+            why = "low on memory: %s" % short
+        banner = ("<div class='flash warn'>The device is %s. Recognition keeps working; %s</div>"
+                  % (why, "check the fan and airflow before it reaches %d &deg;C." % HOT_C if hot_c >= WARN_C
+                     else "restarting the services on this page frees memory if it stays low."))
+    else:
+        banner = ""
     return """%s<div class="health">
 <div class="hcard"><div class="k">Temperature</div>%s</div>
 <div class="hcard"><div class="k">CPU %s MHz</div>%s</div>
@@ -2680,6 +2700,17 @@ def selftest_checks():
     assert not os.path.exists(MATCH_CONF) and "Cosine similarity" in matching_html("t")
     h = device_health()  # whatever this machine exposes; the panel must render either way
     assert "Temperature" in health_html(h) and h["level"] in ("ok", "warn", "bad") and isinstance(h["cpu"], list)
+    # the banner must name which of the two is wrong, on any machine: these do not depend on real sensors
+    def banner_for(temps, avail):
+        fake = dict(h, temps=temps, mem=dict(h["mem"], total=3963, available=avail))
+        hottest = max(temps.values()) if temps else 0
+        fake["level"] = "bad" if hottest >= HOT_C else "warn" if hottest >= WARN_C or avail < LOW_MEM_MB else "ok"
+        return health_html(fake).split("</div>")[0]
+    assert "running hot: CPU is at 85" in banner_for({"CPU": 85.0}, 2000), banner_for({"CPU": 85.0}, 2000)
+    assert "low on memory: 200 MB of 3963 MB free" in banner_for({"CPU": 50.0}, 200)
+    assert "running hot" in banner_for({"CPU": 85.0}, 200) and "low on memory" in banner_for({"CPU": 85.0}, 200)
+    assert "Too hot: CPU is at 92" in banner_for({"CPU": 92.0}, 2000)
+    assert "flash" not in banner_for({"CPU": 50.0}, 2000)
     selftest_http()
     print("selftest ok")
 
