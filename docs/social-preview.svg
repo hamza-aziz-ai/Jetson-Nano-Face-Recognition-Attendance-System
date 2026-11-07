@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Face Attendance on Jetson Nano</title>
+  <desc id="description">Real-time face recognition attendance. DeepStream 6 and TensorRT, two RTSP cameras, on-device inference, and CSV attendance export.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0b1730"/>
+      <stop offset="0.55" stop-color="#13244a"/>
+      <stop offset="1" stop-color="#1d3466"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <g font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+    <rect x="64" y="70" width="48" height="6" rx="3" fill="#6ea8fe"/>
+    <text x="64" y="121" fill="#b8c4dc" font-size="22" font-weight="700" letter-spacing="2">ON-DEVICE FACE RECOGNITION</text>
+    <text x="64" y="229" fill="#ffffff" font-size="76" font-weight="700" letter-spacing="-2">Face Attendance</text>
+    <text x="64" y="286" fill="#d9e3f5" font-size="24">Real-time face recognition attendance on a Jetson Nano</text>
+    <g fill="#ffffff" stroke="#e4e7ec">
+      <rect x="64" y="350" width="384" height="56" rx="12"/>
+      <rect x="464" y="350" width="356" height="56" rx="12"/>
+      <rect x="64" y="422" width="384" height="56" rx="12"/>
+      <rect x="464" y="422" width="356" height="56" rx="12"/>
+    </g>
+    <g fill="#13244a" font-size="22" font-weight="700">
+      <text x="86" y="386">DeepStream 6 + TensorRT</text>
+      <text x="486" y="386">2 RTSP cameras</text>
+      <text x="86" y="458">On-device inference</text>
+      <text x="486" y="458">CSV attendance export</text>
+    </g>
+    <path d="M64 530H1216" fill="none" stroke="#b8c4dc" stroke-opacity="0.25"/>
+    <text x="64" y="578" fill="#b8c4dc" font-size="22">hamza-aziz-ai / Jetson-Nano-Face-Recognition-Attendance-System</text>
+  </g>
+  <rect x="912" y="174" width="304" height="304" rx="36" fill="#050c1a" fill-opacity="0.25"/>
+  <rect x="912" y="158" width="304" height="304" rx="36" fill="#ffffff"/>
+  <g transform="translate(944 190) scale(7.5)">
+    <rect width="32" height="32" rx="8" fill="#2457c5"/>
+    <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 7H7v4m14-4h4v4M7 21v4h4m14-4v4h-4"/>
+      <circle cx="16" cy="12" r="3.5"/>
+      <path d="M11 23c0-2.8 2.2-5 5-5s5 2.2 5 5"/>
+    </g>
+  </g>
+</svg>

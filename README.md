@@ -59,7 +59,8 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 🎞️ **Video upload** | Recognition on a recorded video (H.264/H.265, up to 1080p and 30 min): annotated copy to download with the names found; live cameras always go first; never counted as attendance; deleted after 7 days |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR |
-| 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
+| 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload, Users and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
+| 👥 **Users** | Admins and viewers added by email or phone number; viewers see everything and change nothing (e.g. family); single-use set-password links, no email or SMS needed |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
 | ⚙️ **Operations** | Device health on the website (temperatures, CPU/GPU load, fan, memory) with warnings; frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |
 
@@ -280,6 +281,7 @@ Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECK
 | Registration and approval | ✅ Real enrollment of an approved registration beside the live pipeline: 16.9 s; removal re-enrolls cleanly |
 | Two cameras at once | ✅ Two connections to one phone RTSP stream: 14.4 fps each, side-by-side evidence with labels, per-camera events; one camera broken at start, the other ran. ⏳ A camera coming back after an outage not yet tested |
 | Video upload | ✅ Upload, check, processing beside a live USB camera (15 fps kept) and download through a test website |
+| Users and roles | ✅ Web self-test on the Nano (Python 3.6) with every D-040 case; ⏳ first real family account after deploy |
 
 ## Roadmap
 

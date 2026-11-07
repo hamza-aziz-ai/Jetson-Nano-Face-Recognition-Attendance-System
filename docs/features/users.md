@@ -1,0 +1,14 @@
+# Feature: Users and roles
+
+Added 2026-11-07 at the owner's request ("user addition from Admin portal - two types users, one who can just access attendance data (say if I want to share it with my family members to watch over)"; "Users can be added using their email or phone number or both"). Design D-040.
+
+- **Roles:** an **admin** can do everything; a **viewer** sees everything an admin sees (Overview, Live, Attendance, CSV, faces, evidence frames, clips, the System page's health, service state and log, and the Cameras page with passwords masked, both without their buttons; owner's choice) but changes nothing and does not get People, Video upload or Users. The owner's own login (`web_auth`, set with `python3 web.py --set-password <user>`) is always an admin and cannot be changed on the website.
+- **Adding a user (Users page):** name, role, email and/or phone number with country code (`+91 98765 43210`), and your own password to confirm. The page shows a set-password link once, valid 48 hours, single use; send it yourself (WhatsApp, email). The device sends nothing.
+- **Setting the password:** the person opens the link, chooses a password of at least 15 characters (a few words with spaces work well) and signs in with the email or the phone number.
+- **Managing:** Make admin / Make viewer, New link (the old link stops working; the current password keeps working until the new link is used), Delete (sign-in ends at once). Each needs your password. A role change signs that user out once.
+- **Your account:** sign-in names and password change (current password first; every session of the account ends).
+- **Protection:** sessions and form tokens are bound to the account, its version and its password hash; per account a pause of up to 30 s after 5 wrong passwords; the per-visitor limit as before.
+- **Link address:** `FACEPIPE_PUBLIC_URL` in `facepipe.env` (an `https://` address, e.g. the Cloudflare Tunnel hostname); without it the page completes the link with the address it was opened on.
+- **Storage:** `data/web.db`, tables `users` (name, email, phone, role, salt, PBKDF2 hash, version, created, last sign-in) and `account_links` (hashed link, expiry).
+
+Proof: web self-test on Python 3.6: adding (wrong confirmation password, bad phone without country code, duplicate email or phone), link shown once, viewing does not use it, weak and mismatched passwords refused, used once, two at once only one wins, sign-in by email in any case and phone in any format, `next` checked against the role, the viewer's allowed pages (200) and every admin page, file and POST (403, an upload refused before its body), another account's form token refused, role change and back does not revive old cookies, own password change, a running 24 MB download stopped by deleting the account, the account pause after 5 failures, and only the owner signing in while the database cannot be opened.

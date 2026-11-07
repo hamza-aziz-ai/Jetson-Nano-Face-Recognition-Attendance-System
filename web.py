@@ -110,8 +110,8 @@ def hash_pw(pw, salt):
 
 def set_password(user):
     pw = getpass.getpass("New password for %s: " % user)
-    if len(pw) < 8 or pw != getpass.getpass("Again: "):
-        sys.exit("passwords differ or shorter than 8 characters")
+    if len(pw) < 15 or pw != getpass.getpass("Again: "):
+        sys.exit("passwords differ or shorter than 15 characters (D-040; a few words with spaces work well)")
     write_auth(AUTH_FILE, user, pw)
     print("saved", AUTH_FILE, "- every open session ends now; log in again")
 
@@ -241,7 +241,8 @@ def hms(iso):
 
 # ---------- pages (D-033) ----------
 WEB_DIR = os.path.join(HERE, "web")
-STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "logo.svg": "image/svg+xml"}
+STATIC = {"app.css": "text/css; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "logo.svg": "image/svg+xml",
+          "favicon.svg": "image/svg+xml"}
 LAYOUT = string.Template(open(os.path.join(WEB_DIR, "layout.html"), encoding="utf-8").read())
 PUBLIC = string.Template(open(os.path.join(WEB_DIR, "public.html"), encoding="utf-8").read())
 ICONS = {  # 24x24 stroke icons for the sidebar (inline SVG: no files, no fonts)
@@ -251,10 +252,11 @@ ICONS = {  # 24x24 stroke icons for the sidebar (inline SVG: no files, no fonts)
     "people": "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
     "cameras": "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
     "uploads": "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
+    "users": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6",
     "system": "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"}
 PAGES = [("overview", "/", "Overview"), ("live", "/live", "Live"), ("attendance", "/attendance", "Attendance"),
          ("people", "/people", "People"), ("cameras", "/cameras", "Cameras"), ("uploads", "/uploads", "Video upload"),
-         ("system", "/system", "System")]
+         ("users", "/users", "Users"), ("system", "/system", "System")]
 CSRF_MARK = "@@csrf@@"  # the layout's sign-out form; html_page puts the session's form token here
 CSP = ("default-src 'none'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -276,19 +278,28 @@ FLASH = {  # fixed messages only: the query string never reflects text into the 
     "cam_added": ("ok", "Camera added."), "cam_removed": ("ok", "Camera removed."), "cam_noprev": ("bad", "There is no earlier camera setup to restore."),
     "cam_two": ("bad", "Two network cameras are enabled already; disable one first."),
     "up_cancelled": ("ok", "Cancelled."), "up_deleted": ("ok", "Video deleted."),
+    "u_added": ("ok", "User added."), "u_link": ("ok", "New link made; the previous one no longer works."),
+    "u_role": ("ok", "Role changed; that user signs in again."), "u_deleted": ("ok", "User deleted; their sign-in ends at once."),
+    "u_bad": ("bad", "Check the name, the role and the email or phone number (phone with + and country code)."),
+    "u_taken": ("bad", "That email or phone number is already used."), "u_reauth": ("bad", "Your password was not right; nothing was changed."),
+    "pw_changed": ("ok", "Password changed; sign in again."), "pw_wrong": ("bad", "The current password was not right."),
+    "pw_mismatch": ("bad", "The new passwords differ."), "pw_weak": ("bad", "Use at least 15 characters, not your name, email or phone."),
     "cam_test_ok": ("ok", "The camera answered."), "cam_test_bad": ("bad", "The camera test failed; see the line under its name."), "denied": ("bad", "The request was refused (expired form or another site).")}
 esc = html.escape
 
 
 def layout(page_id, title, body, flash="", refresh=False):
     st = status()
+    p = getattr(REQ, "p", None)  # viewers do not see the admin pages (they are refused anyway, D-040)
     nav = "".join("<a href='%s'%s><svg viewBox='0 0 24 24' aria-hidden='true'><path d='%s'/></svg>%s</a>"
-                  % (href, " aria-current='page'" if pid == page_id else "", ICONS[pid], label) for pid, href, label in PAGES)
+                  % (href, " aria-current='page'" if pid == page_id else "", ICONS[pid], label) for pid, href, label in PAGES
+                  if not (p and p["role"] != "admin" and pid in ADMIN_PAGES))
     msg = ""
     if flash in FLASH:
         kind, text = FLASH[flash]
         msg = "<div class='flash %s' role='status'>%s</div>" % (kind, esc(text))
     return LAYOUT.substitute(title=esc(title), site=esc(SITE), page=page_id, refresh="1" if refresh else "0", nav=nav,
+                             who=esc(p["name"]) if p else "",
                              state=st["state"], detail=esc(st["detail"]), flash=msg, body=body, version=esc(VERSION),
                              now=hms(datetime.datetime.now().isoformat()))
 
@@ -457,7 +468,8 @@ def disk(path):
     return "%.1f GB free of %.1f GB" % (free / 1e9, total / 1e9) if total else "not available"
 
 
-def page_system(csrf, flash):
+def page_system(csrf, flash, read_only=False):
+    """read_only: a viewer sees the same details without the controls (owner, 2026-11-07)"""
     st = status()
     active = service_state()
     desired = read_desired()
@@ -475,7 +487,7 @@ def page_system(csrf, flash):
         button("start", "Start", "primary", "Recognition and attendance recording begin again.") if active != "active" else "",
         button("restart", "Restart", "", "Video and recognition stop for a few seconds, then start again.") if active == "active" else "",
         button("stop", "Stop", "danger", "No attendance is recorded until it is started again. It stays stopped across updates.")
-        if active == "active" else ""])
+        if active == "active" else ""]) if not read_only else ""
     body = """<h1>System</h1><p class="sub">Device health, service control and recent log lines.</p>
 <section aria-labelledby="h-health"><div class="sh"><h2 id="h-health">Device health</h2><span class="count">refreshes every 5 s</span></div>
 <div id="health">%s</div></section>
@@ -494,7 +506,7 @@ def page_system(csrf, flash):
         "%.1f fps" % st["fps"] if "fps" in st else "&ndash;", "%.1f" % st["det_fps"] if "det_fps" in st else "&ndash;",
         st.get("frames", "&ndash;"), esc(camera_label()), buttons,
         "cosine &ge; %.2f" % matching()["cosine"] if matching()["metric"] == "cosine" else "L2 &le; %.2f" % matching()["l2"],
-        matching_html(csrf), esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
+        matching_html(csrf) if not read_only else "", esc(str(st.get("version", "?"))), esc(VERSION), esc(disk(HERE)),
         esc(disk(REC_DIR)), esc(upd[-1]) if upd else "no update has run yet", esc("\n".join(log_lines)) or "no log yet")
     return layout("system", "System", body, flash=flash)
 
@@ -762,6 +774,11 @@ def db():
     c.execute("CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created REAL, expires REAL, used REAL, person TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS submissions (id TEXT PRIMARY KEY, invite TEXT, name TEXT, person TEXT, created REAL,"
               " consent TEXT, photos INTEGER, status TEXT, note TEXT, decided REAL)")
+    # accounts (D-040): unique sign-in names, at least one; version rises on every role or password change
+    c.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE, phone TEXT UNIQUE,"
+              " role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')), salt TEXT, hash TEXT, version INTEGER NOT NULL DEFAULT 0,"
+              " created REAL NOT NULL, last_login REAL, CHECK (email IS NOT NULL OR phone IS NOT NULL))")
+    c.execute("CREATE TABLE IF NOT EXISTS account_links (user TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, expires REAL NOT NULL)")
     return c
 
 
@@ -1058,16 +1075,16 @@ def page_not_found():
     return public_page("Page not found", body, "notfound", "Jetson Nano edge AI", "Recognition runs on this device; nothing leaves it.")
 
 
-def page_login(nxt, error=""):
-    body = """<h1>Sign in</h1><p class="sub">Administrator access to attendance, live view and device control.</p>
-<div class="flash bad"%s role="alert">%s</div>
+def page_login(nxt, error="", info=""):
+    body = """<h1>Sign in</h1><p class="sub">Attendance, live view and, for administrators, device control.</p>
+<div class="flash ok"%s role="status">%s</div><div class="flash bad"%s role="alert">%s</div>
 <section><form class="body form" method="post" action="/login">
 <input type="hidden" name="next" value="%s">
-<label class="field"><span>User name</span><input name="user" required maxlength="64" autocomplete="username" autofocus></label>
+<label class="field"><span>Email, phone number or user name</span><input name="user" required maxlength="254" autocomplete="username" autofocus></label>
 <label class="field"><span>Password</span><input name="password" type="password" required maxlength="256" autocomplete="current-password"></label>
 <button class="btn primary submit" type="submit">Sign in</button>
-</form></section>""" % ("" if error else " hidden", esc(error), esc(nxt))
-    return public_page("Sign in", body, "login", "Administrator", "Recognition runs on this device; nothing leaves it.")
+</form></section>""" % ("" if info else " hidden", esc(info), "" if error else " hidden", esc(error), esc(nxt))
+    return public_page("Sign in", body, "login", "Sign in", "Recognition runs on this device; nothing leaves it.")
 
 
 def page_register(invite, token="", error="", name=""):
@@ -1297,7 +1314,8 @@ def probe_rtsp(url):
     return False, "the stream could not be opened"
 
 
-def page_cameras(csrf, flash="", test=None):
+def page_cameras(csrf, flash="", test=None, read_only=False):
+    """read_only: a viewer sees the setup (passwords masked as for admins) without any form (owner, 2026-11-07)"""
     cfg = load_cameras()
     st = status()
 
@@ -1360,6 +1378,8 @@ def page_cameras(csrf, flash="", test=None):
         form("revert", "Revert to the previous setup", "", {}, "The camera setup before the last change is restored and recognition restarts.",
              "Revert the camera setup?") if os.path.exists(CAM_JSON + ".prev") else "",
         len(cfg["rtsp"]), MAX_ACTIVE_RTSP, table, csrf)
+    if read_only:  # every control on this page is a form; the route refuses its POSTs anyway (D-040)
+        body = re.sub(r"<form[ >].*?</form>", "", body, flags=re.S)
     return layout("cameras", "Cameras", body, flash=flash)
 
 
@@ -1640,6 +1660,250 @@ def page_uploads(csrf, remote, flash=""):
     return layout("uploads", "Video upload", body, flash=flash, refresh=any(u["state"] in ("queued", "processing") for u in uploads()))
 
 
+
+# ---------- accounts (D-040): the owner (web_auth, CLI) plus admins and viewers added on the Users page ----------
+# Viewers see everything an admin sees, read-only (owner, 2026-11-07): Overview, Live, Attendance, CSV, faces, evidence,
+# clips, and the System and Cameras pages without their controls; not People, Video upload or Users, and no changes. Sign-in names are an email, a phone number
+# (with +country code) or both; they are not verified. No email or SMS is sent: the admin passes the set-password link on.
+ROLES = ("admin", "viewer")
+EMAIL_RE = re.compile(r"^[^@\s<>\"'`]{1,64}@[^@\s<>\"'`]{1,190}\.[^@\s<>\"'`]{2,}$")
+PHONE_RE = re.compile(r"^\+[1-9][0-9]{7,14}$")
+UID_RE = re.compile(r"^u_[0-9a-f]{16}$")
+LINK_RE = re.compile(r"^[0-9a-f]{32}$")
+LINK_HOURS = 48
+MIN_PW = 15  # NIST SP 800-63-4 for passwords used alone; spaces allowed, so a few words do
+PUBLIC_URL = os.environ.get("FACEPIPE_PUBLIC_URL", "")  # e.g. https://attendance.example.com: set-password links use it
+ADMIN_PAGES = ("people", "uploads", "users")
+VIEWER_GET = ("/", "/live", "/live.mjpg", "/attendance", "/csv", "/api/status", "/api/health", "/system", "/cameras", "/account")
+VIEWER_POST = ("/logout", "/account/password")
+REQ = threading.local()  # the signed-in principal of this request's thread, for the page layout
+
+
+def norm_email(s):
+    s = (s or "").strip().lower()
+    return s if EMAIL_RE.match(s) else None
+
+
+def norm_phone(s):
+    s = re.sub(r"[\s().-]", "", (s or "").strip())
+    return s if PHONE_RE.match(s) else None
+
+
+def public_origin():
+    """FACEPIPE_PUBLIC_URL if it is a plain https origin, else "" (the page then adds the browser's own address)"""
+    u = urlparse(PUBLIC_URL)
+    if u.scheme != "https" or not u.hostname or u.path not in ("", "/") or u.query or u.params or u.fragment or u.username:
+        return ""
+    return "https://" + u.netloc
+
+
+def pw_problem(pw, *personal):
+    if len(pw) < MIN_PW:
+        return "Use at least %d characters; a few words with spaces work well." % MIN_PW
+    if len(pw) > 256:
+        return "Use at most 256 characters."
+    if any(x and pw.strip().lower() == str(x).strip().lower() for x in personal):
+        return "The password must not be your name, email or phone number."
+    return None
+
+
+def allowed(p, method, path):
+    """the one authorization rule (D-040): admins everything; viewers the exact read-only routes below"""
+    if p["role"] == "admin":
+        return True
+    if method in ("GET", "HEAD"):
+        return path in VIEWER_GET or bool(
+            (path.startswith("/rec/") and REC_RE.match(path[5:])) or (path.startswith("/snap/") and SNAP_RE.match(path[6:]))
+            or re.match(r"^/photo/[^/]+$", path))
+    return path in VIEWER_POST
+
+
+def account_row(c, uid):
+    return c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+
+
+def issue_link(uid):
+    """a new single-use set-password link for the account; any older one stops working"""
+    t = secrets.token_hex(16)
+    with _db_lock, db() as c:
+        c.execute("INSERT OR REPLACE INTO account_links VALUES (?,?,?)", (uid, token_hash(t), time.time() + LINK_HOURS * 3600))
+    return t
+
+
+def link_account(t):
+    if not LINK_RE.match(t or ""):
+        return None
+    with db() as c:
+        return c.execute("SELECT u.* FROM account_links l JOIN users u ON u.id = l.user WHERE l.hash=? AND l.expires>?",
+                         (token_hash(t), time.time())).fetchone()
+
+
+def redeem_link(t, pw):
+    """sets the password and uses the link up in one transaction; returns an error text or None"""
+    r = link_account(t)
+    if not r:
+        return "This link is not valid any more; ask for a new one."
+    err = pw_problem(pw, r["name"], r["email"], r["phone"])
+    if err:
+        return err
+    salt = os.urandom(16)
+    digest = hash_pw(pw, salt)
+    with _db_lock, db() as c:
+        if c.execute("DELETE FROM account_links WHERE hash=? AND expires>?", (token_hash(t), time.time())).rowcount != 1:
+            return "This link is not valid any more; ask for a new one."
+        c.execute("UPDATE users SET salt=?, hash=?, version=version+1 WHERE id=?", (salt.hex(), digest, r["id"]))
+    LOG.write("INFO", "account %s: password set with a link" % r["id"])
+    return None
+
+
+def set_account_password(uid, pw):
+    salt = os.urandom(16)
+    digest = hash_pw(pw, salt)
+    with _db_lock, db() as c:
+        c.execute("UPDATE users SET salt=?, hash=?, version=version+1 WHERE id=?", (salt.hex(), digest, uid))
+        c.execute("DELETE FROM account_links WHERE user=?", (uid,))
+
+
+def link_html(t):
+    path = "/account/setup?t=" + t
+    origin = public_origin()
+    return ("<code class='link'>%s</code>" % esc(origin + path)) if origin else \
+        "<code class='link' data-rel='%s'>%s</code>" % (esc(path), esc(path))
+
+
+SHOWN_LINKS = {}  # one-time display of a new set-password link: nonce -> (account id, token, expires)
+
+
+def page_users(csrf, owner_name, flash="", show=""):
+    with db() as c:
+        rows = c.execute("SELECT * FROM users ORDER BY role, name").fetchall()
+        pending = {r["user"]: r["expires"] for r in c.execute("SELECT user, expires FROM account_links").fetchall()}
+    new = ""
+    if show in SHOWN_LINKS and SHOWN_LINKS[show][2] > time.time():
+        uid, t, _ = SHOWN_LINKS.pop(show)
+        who = next((r["name"] for r in rows if r["id"] == uid), "the user")
+        new = ("<div class='flash ok' role='status'>Send this link to %s yourself (WhatsApp, email). It works once, for %d hours, "
+               "and is shown only now: %s</div>" % (esc(who), LINK_HOURS, link_html(t)))
+    reauth = ("<label class='field'><span>Your password</span><input name='current' type='password' required maxlength='256' "
+              "autocomplete='current-password'></label>")
+
+    def act(action, uid, label, cls="", extra=""):
+        return ("<details class='act'><summary class='btn %s'>%s</summary><form method='post' action='/users/%s' class='form'>"
+                "<input type='hidden' name='csrf' value='%s'><input type='hidden' name='id' value='%s'>%s%s"
+                "<button class='btn %s' type='submit'>%s</button></form></details>" % (cls, label, action, csrf, uid, extra, reauth, cls, label))
+    trs = ["<tr><td><b>%s</b><div class='m muted'>owner, set on the device</div></td><td>%s</td><td><span class='badge in'>Admin</span></td>"
+           "<td class='m muted'>&ndash;</td><td></td></tr>" % (esc(owner_name), esc(owner_name))]
+    for r in rows:
+        names = " &middot; ".join(esc(x) for x in (r["email"], r["phone"]) if x)
+        state = ("link sent, valid until %s" % hm(datetime.datetime.fromtimestamp(pending[r["id"]]).isoformat())) if r["id"] in pending \
+            else ("" if r["hash"] else "link expired: make a new one")
+        last = hms(datetime.datetime.fromtimestamp(r["last_login"]).isoformat()) if r["last_login"] else "never"
+        other = "viewer" if r["role"] == "admin" else "admin"
+        trs.append("<tr><td><b>%s</b><div class='m muted'>%s</div></td><td>%s</td><td><span class='badge %s'>%s</span></td>"
+                   "<td class='m muted'>%s</td><td class='acts'>%s%s%s</td></tr>" % (
+                       esc(r["name"]), esc(state), names, "in" if r["role"] == "admin" else "out", r["role"].title(), last,
+                       act("role", r["id"], "Make " + other, extra="<input type='hidden' name='role' value='%s'>" % other),
+                       act("link", r["id"], "New link"), act("delete", r["id"], "Delete", "danger")))
+    body = """<h1>Users</h1><p class="sub">Who can sign in. Admins can do everything; viewers can see everything (attendance, faces, evidence, live view) but change nothing.</p>%s
+<section aria-labelledby="h-u"><div class="sh"><h2 id="h-u">Accounts</h2><span class="count">%d</span></div>
+<table><thead><tr><th scope="col">Name</th><th scope="col">Signs in with</th><th scope="col">Role</th><th scope="col">Last sign-in</th><th scope="col">Actions</th></tr></thead><tbody>%s</tbody></table></section>
+<section aria-labelledby="h-add"><div class="sh"><h2 id="h-add">Add a user</h2></div>
+<form method="post" action="/users/add" class="body form wide" autocomplete="off"><input type="hidden" name="csrf" value="%s">
+<div class="row"><label class="field"><span>Name</span><input name="name" required maxlength="60"></label>
+<label class="field"><span>Role</span><select name="role"><option value="viewer">Viewer (sees everything, changes nothing)</option><option value="admin">Admin</option></select></label></div>
+<div class="row"><label class="field"><span>Email (optional)</span><input name="email" type="email" maxlength="254" autocomplete="off"></label>
+<label class="field"><span>Phone (optional, with country code)</span><input name="phone" type="tel" maxlength="24" placeholder="+91 98765 43210" autocomplete="off"></label></div>
+<div class="row">%s</div>
+<small class="muted">At least an email or a phone number; either signs in. You get a set-password link to send the person yourself; the device sends nothing.</small>
+<div><button class="btn primary" type="submit">Add user</button></div></form></section>""" % (
+        new, len(rows) + 1, "".join(trs), csrf, reauth)
+    return layout("users", "Users", body, flash=flash)
+
+
+def users_post(server, actor, path, form):
+    """handles /users/<action>; returns (FLASH key, nonce of a link to show once or "")"""
+    get = lambda k: form.get(k, [""])[0]
+    if not server.verify(actor, get("current")):
+        return "u_reauth", ""
+    action = path.rsplit("/", 1)[-1]
+    if action == "add":
+        name, role = get("name").strip(), get("role")
+        email, phone = get("email").strip(), get("phone").strip()
+        e, ph = norm_email(email), norm_phone(phone)
+        c_owner = server.creds()
+        if not NAME_RE.match(name) or role not in ROLES or (email and not e) or (phone and not ph) or not (e or ph):
+            return "u_bad", ""
+        if c_owner and any(x and x == c_owner[0].lower() for x in (e, ph)):
+            return "u_taken", ""
+        uid = "u_" + secrets.token_hex(8)
+        try:
+            with _db_lock, db() as c:
+                c.execute("INSERT INTO users (id, name, email, phone, role, version, created) VALUES (?,?,?,?,?,0,?)",
+                          (uid, name, e, ph, role, time.time()))
+        except sqlite3.IntegrityError:
+            return "u_taken", ""
+        LOG.write("INFO", "account %s added as %s by %s" % (uid, role, actor["uid"]))
+        nonce = secrets.token_hex(8)
+        SHOWN_LINKS.clear()
+        SHOWN_LINKS[nonce] = (uid, issue_link(uid), time.time() + 600)
+        return "u_added", nonce
+    uid = get("id")
+    if not UID_RE.match(uid):
+        return "denied", ""
+    with db() as c:
+        r = account_row(c, uid)
+    if not r:
+        return "denied", ""
+    if action == "role" and get("role") in ROLES:
+        with _db_lock, db() as c:  # the version change ends the account's sessions (D-040)
+            c.execute("UPDATE users SET role=?, version=version+1 WHERE id=?", (get("role"), uid))
+        LOG.write("INFO", "account %s made %s by %s" % (uid, get("role"), actor["uid"]))
+        return "u_role", ""
+    if action == "link":
+        nonce = secrets.token_hex(8)
+        SHOWN_LINKS.clear()
+        SHOWN_LINKS[nonce] = (uid, issue_link(uid), time.time() + 600)
+        LOG.write("INFO", "account %s: new set-password link by %s" % (uid, actor["uid"]))
+        return "u_link", nonce
+    if action == "delete":
+        with _db_lock, db() as c:
+            c.execute("DELETE FROM account_links WHERE user=?", (uid,))
+            c.execute("DELETE FROM users WHERE id=?", (uid,))
+        LOG.write("INFO", "account %s deleted by %s" % (uid, actor["uid"]))
+        return "u_deleted", ""
+    return "denied", ""
+
+
+def page_account(p, csrf, flash=""):
+    with db() as c:
+        r = account_row(c, p["uid"]) if p["uid"] != "owner" else None
+    names = " &middot; ".join(esc(x) for x in ((r["email"], r["phone"]) if r else (p["name"],)) if x)
+    change = ("<p class='body muted'>The owner's password is set on the device: <code>python3 web.py --set-password %s</code>.</p>" % esc(p["name"])
+              if p["uid"] == "owner" else """<form method="post" action="/account/password" class="body form"><input type="hidden" name="csrf" value="%s">
+<label class="field"><span>Current password</span><input name="current" type="password" required maxlength="256" autocomplete="current-password"></label>
+<label class="field"><span>New password (at least %d characters)</span><input name="password" type="password" required minlength="%d" maxlength="256" autocomplete="new-password"></label>
+<label class="field"><span>New password again</span><input name="again" type="password" required maxlength="256" autocomplete="new-password"></label>
+<div><button class="btn primary" type="submit">Change password</button></div></form>""" % (csrf, MIN_PW, MIN_PW))
+    body = """<h1>Your account</h1><p class="sub">%s, %s. Signs in with %s.</p>
+<section aria-labelledby="h-pw"><div class="sh"><h2 id="h-pw">Password</h2></div>%s</section>""" % (
+        esc(p["name"]), "administrator" if p["role"] == "admin" else "viewer (sees everything, changes nothing)", names, change)
+    return layout("account", "Your account", body, flash=flash)
+
+
+def page_setup(t, ok, error=""):
+    if not ok:
+        body = "<h1>Link not valid</h1><p class='sub'>This set-password link was used already or has expired. Ask the administrator for a new one.</p>"
+        return public_page("Set your password", body, "login", "Account", "Recognition runs on this device; nothing leaves it.")
+    body = """<h1>Set your password</h1><p class="sub">Choose a password of at least %d characters; a few words with spaces work well. Then sign in with your email or phone number.</p>
+<div class="flash bad"%s role="alert">%s</div>
+<section><form class="body form" method="post" action="/account/setup"><input type="hidden" name="t" value="%s">
+<label class="field"><span>New password</span><input name="password" type="password" required minlength="%d" maxlength="256" autocomplete="new-password" autofocus></label>
+<label class="field"><span>Again</span><input name="again" type="password" required maxlength="256" autocomplete="new-password"></label>
+<button class="btn primary submit" type="submit">Set password</button></form></section>""" % (
+        MIN_PW, "" if error else " hidden", esc(error), esc(t), MIN_PW)
+    return public_page("Set your password", body, "login", "Account", "Recognition runs on this device; nothing leaves it.")
+
+
 # ---------- server ----------
 MAX_BODY = 4096       # forms here are tiny
 MAX_REQUESTS = 24     # concurrent requests; each thread costs memory on a 4 GB device
@@ -1648,10 +1912,10 @@ FAIL_LIMIT, FAIL_WINDOW = 10, 900  # failed logins per client before refusing wi
 WEB_STARTED = int(time.time())
 SESSION_HOURS = 12
 COOKIE = "fp_session"
-TOKEN_RE = re.compile(r"^v1\.([0-9]{10})\.([0-9a-f]{64})$")
-PAGE_PATHS = ("/", "/live", "/attendance", "/people", "/cameras", "/uploads", "/system")  # where a sign-in may lead back to
+TOKEN_RE = re.compile(r"^v2\.(owner|u_[0-9a-f]{16})\.([0-9]{10})\.([0-9a-f]{64})$")  # v2.<account>.<expiry>.<mac> (D-040)
+PAGE_PATHS = ("/", "/live", "/attendance", "/people", "/cameras", "/uploads", "/users", "/account", "/system")  # where a sign-in may lead back to
 PROTECTED = ("/api/", "/live.mjpg", "/rec/", "/snap/", "/photo/", "/pending/", "/csv", "/uploads/")  # 401 before sign-in, never 404
-NEXT_RE = re.compile(r"^/(live|attendance|people|cameras|uploads|system)?(\?[A-Za-z0-9=&_.:-]{0,200})?$")
+NEXT_RE = re.compile(r"^/(live|attendance|people|cameras|uploads|users|account|system)?(\?[A-Za-z0-9=&_.:-]{0,200})?$")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1674,16 +1938,18 @@ class Handler(BaseHTTPRequestHandler):
         return self.client_address[0] in ("127.0.0.1", "::1") and self.headers.get("X-Forwarded-Proto") == "https"
 
     def user(self):
-        """the signed-in user name from the session cookie, or None (D-036)"""
+        """the signed-in principal from the session cookie, or None (D-036, D-040)"""
         self.token = ""
         for part in self.headers.get("Cookie", "").split(";"):
             k, _, v = part.strip().partition("=")
             if k == COOKIE:
                 self.token = v
-        return self.server.session_user(self.token)
+        self.principal = REQ.p = self.server.session_principal(self.token)
+        return self.principal
 
     def csrf(self):
-        return self.server.sign("csrf:v1") or ""
+        p = getattr(self, "principal", None)
+        return self.server.csrf_for(p) if p else ""
 
     def cookie(self, value, age):
         return "%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax%s" % (COOKIE, value, age, "; Secure" if self.https() else "")
@@ -1693,7 +1959,7 @@ class Handler(BaseHTTPRequestHandler):
         nxt = nxt if NEXT_RE.match(nxt) else "/"
         if self.user():
             return self.redirect(nxt)
-        self.html_page(page_login(nxt))
+        self.html_page(page_login(nxt, info="Password set. Sign in with your email or phone number." if q.get("msg") == ["pw_set"] else ""))
 
     def login_post(self):
         """public: user name and password; refused from other sites, throttled per visitor before the costly hash"""
@@ -1711,19 +1977,26 @@ class Handler(BaseHTTPRequestHandler):
             return page(403, "The form was refused; open the sign-in page again.")
         if len(fails) >= FAIL_LIMIT:
             return page(429, "Too many failed attempts; try again in 15 minutes.")
-        c = self.server.creds()
-        if not c:
+        if not self.server.creds():
             return page(503, "No login is set on this device.")
-        u, salt, digest = c
-        if hmac.compare_digest(get("user").encode(), u.encode()) & \
-                hmac.compare_digest(hash_pw(get("password"), salt).encode(), digest.encode()):
+        p = self.server.find_login(get("user"))
+        if p and self.server.cooling(p["uid"]):  # a short pause for this account after repeated failures (D-040)
+            return page(429, "Too many attempts for this account; wait a few seconds and try again.")
+        if self.server.verify(p, get("password")):  # unknown names cost the same hashing
             self.server.fails.pop(ip, None)
-            LOG.write("INFO", "signed in from %s" % ip)
+            self.server.acct_ok(p["uid"])
+            if p["uid"] != "owner":
+                with _db_lock, db() as c:
+                    c.execute("UPDATE users SET last_login=? WHERE id=?", (now, p["uid"]))
+            LOG.write("INFO", "signed in: %s (%s) from %s" % (p["uid"], p["role"], ip))
             exp = int(now) + SESSION_HOURS * 3600
-            return self.redirect(nxt, {"Set-Cookie": self.cookie(self.server.session_token(exp), SESSION_HOURS * 3600)})
+            nxt = nxt if allowed(p, "GET", urlparse(nxt).path) else "/"
+            return self.redirect(nxt, {"Set-Cookie": self.cookie(self.server.session_token(p, exp), SESSION_HOURS * 3600)})
         self.server.fails[ip] = fails + [now]
+        if p:
+            self.server.acct_fail(p["uid"])
         LOG.write("WARNING", "sign-in failed from %s" % ip)
-        return page(401, "Wrong user name or password.")
+        return page(401, "Wrong sign-in name or password.")
 
     def headers_common(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -1788,6 +2061,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "HEAD":
             return
         left = end - start + 1
+        p, sent, at = getattr(self, "principal", None), 0, time.time()
         with open(path, "rb") as f:
             f.seek(start)
             while left > 0:
@@ -1796,6 +2070,13 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 left -= len(chunk)
+                sent += len(chunk)
+                if p and (sent >= 2 << 20 or time.time() - at > 3):  # a signed-in download: still allowed? (D-040)
+                    sent, at = 0, time.time()
+                    q = self.server.session_principal(self.token)
+                    if not q or not allowed(q, "GET", urlparse(self.path).path):
+                        self.close_connection = True
+                        break
 
     def live(self):
         """MJPEG: annotated frames from facepipe (NVJPG). Touching 'want' tells facepipe someone is watching."""
@@ -1812,7 +2093,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 now = time.time()
                 if now - tick > 3:
-                    if not self.server.session_user(self.token):  # session expired, or the password changed
+                    q = self.server.session_principal(self.token)  # expired, password or role changed, deleted
+                    if not q or not allowed(q, "GET", "/live.mjpg"):
                         break
                     open(want, "a").close()
                     os.utime(want)
@@ -1855,8 +2137,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.do_GET()
 
+    def forbidden(self, path):
+        """a signed-in viewer on an admin route (D-040)"""
+        if path in PAGE_PATHS:
+            body = layout("overview", "Not available", "<h1>Not available</h1><p class='sub'>This page is for administrators. "
+                          "Your account can see Overview, Live, Attendance, Cameras and System.</p>")
+            return self.send(403, body.replace(CSRF_MARK, self.csrf()), extra={"Content-Security-Policy": CSP})
+        return self.send(403, "Not allowed for this account", "text/plain; charset=utf-8")
+
     def do_GET(self):
         self.extra_headers = {}  # per request (a kept-alive connection reuses this handler)
+        self.principal = REQ.p = None
         url = urlparse(self.path)
         if url.path.startswith("/static/") and url.path[8:] in STATIC:  # public assets, no data in them
             return self.file(os.path.join(WEB_DIR, url.path[8:]), STATIC[url.path[8:]], cache="public, max-age=3600")
@@ -1868,9 +2159,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.html_page(page_register_done())
         if url.path == "/login":
             return self.login_get(q)
+        if url.path == "/account/setup":  # public: the single-use link is the permission; viewing does not use it up
+            t = q.get("t", [""])[0]
+            return self.html_page(page_setup(t, bool(link_account(t))))
         user = self.user()
         if not user:
             return self.login_required(url)
+        if not allowed(user, self.command, url.path):
+            return self.forbidden(url.path)
+        if url.path == "/users":
+            return self.html_page(page_users(self.csrf(), self.server.creds()[0], q.get("msg", [""])[0], q.get("show", [""])[0]))
+        if url.path == "/account":
+            return self.html_page(page_account(user, self.csrf(), q.get("msg", [""])[0]))
         if url.path == "/":
             return self.html_page(page_overview())
         if url.path == "/live":
@@ -1895,9 +2195,9 @@ class Handler(BaseHTTPRequestHandler):
         if m and os.path.exists(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg")):
             return self.file(os.path.join(REG_DIR, m.group(1), m.group(2) + ".jpg"), cache="no-store")
         if url.path == "/cameras":
-            return self.html_page(page_cameras(self.csrf(), q.get("msg", [""])[0]))
+            return self.html_page(page_cameras(self.csrf(), q.get("msg", [""])[0], read_only=user["role"] != "admin"))
         if url.path == "/system":
-            return self.html_page(page_system(self.csrf(), q.get("msg", [""])[0]))
+            return self.html_page(page_system(self.csrf(), q.get("msg", [""])[0], user["role"] != "admin"))
         if url.path == "/uploads":
             return self.html_page(page_uploads(self.csrf(), self.https(), q.get("msg", [""])[0]))
         m = re.match(r"^/uploads/([0-9a-f]{16})/result\.mp4$", url.path)
@@ -1979,14 +2279,46 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, json.dumps({"ok": False, "error": err}), "application/json")
         return self.send(200, json.dumps({"ok": True, "id": uid}), "application/json")
 
+    def setup_post(self):
+        """public: a new password through a set-password link (D-040)"""
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_BODY:
+            return self.send(413, "Too large", "text/plain; charset=utf-8")
+        form = parse_qs(self.rfile.read(n).decode(errors="replace"))
+        get = lambda k: form.get(k, [""])[0]
+        ip, now = self.client_ip(), time.time()
+        fails = [t for t in self.server.fails.get(ip, []) if now - t < FAIL_WINDOW]
+        t = get("t")
+        page = lambda code, msg, ok=True: self.send(code, page_setup(t, ok, msg), extra={"Content-Security-Policy": CSP})
+        if not self.same_origin():
+            return page(403, "The form was refused; open the link again.")
+        if len(fails) >= FAIL_LIMIT:
+            return page(429, "Too many attempts; try again in 15 minutes.")
+        if not link_account(t):
+            self.server.fails[ip] = fails + [now]
+            return page(403, "", ok=False)
+        if get("password") != get("again"):
+            return page(400, "The two passwords differ.")
+        with self.server.hash_slots:
+            err = redeem_link(t, get("password"))
+        if err:
+            return page(400, err, ok=bool(link_account(t)))
+        return self.redirect("/login?msg=pw_set")
+
     def do_POST(self):
+        self.principal = REQ.p = None
         if urlparse(self.path).path == "/register":
             return self.register_post()
         if urlparse(self.path).path == "/login":
             return self.login_post()
+        if urlparse(self.path).path == "/account/setup":
+            return self.setup_post()
         user = self.user()
         if not user:
             return self.send(401, "Login required", "text/plain; charset=utf-8")
+        if not allowed(user, "POST", urlparse(self.path).path):  # before any body is read (D-040)
+            self.close_connection = True
+            return self.send(403, "Not allowed for this account", "text/plain; charset=utf-8")
         if urlparse(self.path).path == "/uploads/add":
             return self.upload_post()
         n = int(self.headers.get("Content-Length") or 0)
@@ -1996,7 +2328,8 @@ class Handler(BaseHTTPRequestHandler):
         token = form.get("csrf", [""])[0]
         if not self.same_origin() or not hmac.compare_digest(token.encode(errors="replace"), self.csrf().encode()):
             LOG.write("WARNING", "POST %s refused from %s (origin or form token)" % (self.path[:60], self.client_ip()))
-            back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras", "uploads") else "system")
+            back = "/" + (self.path.split("/")[1] if self.path.split("/")[1] in ("people", "cameras", "uploads", "users", "account") else
+                          ("system" if user["role"] == "admin" else ""))
             return self.redirect(back + "?msg=denied")
         path = urlparse(self.path).path
         if path == "/logout":
@@ -2032,6 +2365,23 @@ class Handler(BaseHTTPRequestHandler):
             if test:  # the test result is shown on the page itself, without a redirect
                 return self.html_page(page_cameras(self.csrf(), msg, test))
             return self.redirect("/cameras?msg=" + msg)
+        if path.startswith("/users/"):
+            msg, show = users_post(self.server, user, path, form)
+            return self.redirect("/users?msg=" + msg + ("&show=" + show if show else ""))
+        if path == "/account/password":
+            if user["uid"] == "owner" or not self.server.verify(user, form.get("current", [""])[0]):
+                return self.redirect("/account?msg=pw_wrong")
+            new = form.get("password", [""])[0]
+            if new != form.get("again", [""])[0]:
+                return self.redirect("/account?msg=pw_mismatch")
+            with db() as c:
+                r = account_row(c, user["uid"])
+            if pw_problem(new, r["name"], r["email"], r["phone"]):
+                return self.redirect("/account?msg=pw_weak")
+            with self.server.hash_slots:
+                set_account_password(user["uid"], new)
+            LOG.write("INFO", "account %s changed its password" % user["uid"])
+            return self.redirect("/login", {"Set-Cookie": self.cookie("", 0)})
         if path in ("/uploads/cancel", "/uploads/delete"):
             return self.redirect("/uploads?msg=" + upload_action(path.rsplit("/", 1)[1], form.get("id", [""])[0]))
         if path == "/people/remove":
@@ -2057,6 +2407,8 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
         self.live_slots = threading.BoundedSemaphore(MAX_LIVE)
         self.fails = {}
         self.reg_hits = {}
+        self.acct, self.acct_lock = {}, threading.Lock()  # account id -> [failures, cooldown until] (D-040)
+        self.hash_slots = threading.BoundedSemaphore(2)     # at most 2 password hashes at once on the Nano
         self.auth_file, self._auth, self._auth_sig = AUTH_FILE, None, None
         os.makedirs(DATA, exist_ok=True)
         self.key = session_key(os.path.join(DATA, "session.key"))
@@ -2073,23 +2425,82 @@ class Server(socketserver.ThreadingMixIn, HTTPServer):
         except (OSError, ValueError):
             return None
 
-    def sign(self, purpose, *parts):
-        """HMAC over a purpose, its parts and the current password hash: a new password ends sessions and open forms"""
+    def owner(self):
+        """the owner principal (web_auth): always an admin, version 0, its hash changes with --set-password"""
         c = self.creds()
-        if not c:
+        return {"uid": "owner", "name": c[0], "role": "admin", "salt": c[1], "digest": c[2], "version": 0} if c else None
+
+    def principal(self, uid):
+        """an account with a password, or None (also when the database fails: closed, D-040)"""
+        if uid == "owner":
+            return self.owner()
+        try:
+            with db() as c:
+                r = c.execute("SELECT * FROM users WHERE id=? AND hash IS NOT NULL", (uid,)).fetchone()
+        except sqlite3.Error:
             return None
-        return hmac.new(self.key, "|".join((purpose,) + parts + (c[2],)).encode(), hashlib.sha256).hexdigest()
+        return {"uid": r["id"], "name": r["name"], "role": r["role"], "salt": bytes.fromhex(r["salt"]), "digest": r["hash"],
+                "version": r["version"]} if r else None
 
-    def session_token(self, exp):
-        return "v1.%d.%s" % (exp, self.sign("session:v1", str(exp)))
+    def find_login(self, ident):
+        """the principal for a sign-in name: the owner's user name, or an account's email or phone number"""
+        c = self.creds()
+        if c and hmac.compare_digest(ident.encode(errors="replace"), c[0].encode()):
+            return self.owner()
+        e, ph = norm_email(ident), norm_phone(ident)
+        if not (e or ph):
+            return None
+        try:
+            with db() as cn:
+                r = cn.execute("SELECT id FROM users WHERE (email=? OR phone=?) AND hash IS NOT NULL", (e, ph)).fetchone()
+        except sqlite3.Error:
+            return None
+        return self.principal(r["id"]) if r else None
 
-    def session_user(self, token):
-        """the user name for a valid, unexpired session token, else None"""
+    def verify(self, p, pw):
+        """password check with the same hashing work whether or not the account exists"""
+        with self.hash_slots:
+            d = hash_pw(pw, p["salt"] if p else b"\0" * 16)
+        return bool(p) and hmac.compare_digest(d.encode(), p["digest"].encode())
+
+    def cooling(self, uid):
+        with self.acct_lock:
+            f = self.acct.get(uid)
+            return bool(f and f[1] > time.time())
+
+    def acct_fail(self, uid):
+        """after 5 failures a pause doubling up to 30 s; no long lockout (anyone could lock a family member out)"""
+        with self.acct_lock:
+            if len(self.acct) > 1000:  # ponytail: bounded by clearing; a per-entry expiry if this ever matters
+                self.acct.clear()
+            f = self.acct.setdefault(uid, [0, 0.0])
+            f[0] += 1
+            if f[0] >= 5:
+                f[1] = time.time() + min(2 ** (f[0] - 5), 30)
+
+    def acct_ok(self, uid):
+        with self.acct_lock:
+            self.acct.pop(uid, None)
+
+    def sign(self, purpose, p, *parts):
+        """HMAC over a purpose, the account, its version and password hash: a role or password change, or deleting the
+        account, ends its sessions and open forms (D-036, D-040)"""
+        return hmac.new(self.key, "|".join((purpose, p["uid"], str(p["version"]), p["digest"]) + parts).encode(),
+                        hashlib.sha256).hexdigest()
+
+    def csrf_for(self, p):
+        return self.sign("csrf:v2", p)
+
+    def session_token(self, p, exp):
+        return "v2.%s.%d.%s" % (p["uid"], exp, self.sign("session:v2", p, str(exp)))
+
+    def session_principal(self, token):
+        """the principal for a valid, unexpired session token, else None"""
         m = TOKEN_RE.match(token or "")
-        if not m or not time.time() < int(m.group(1)) <= time.time() + SESSION_HOURS * 3600:
+        if not m or not time.time() < int(m.group(2)) <= time.time() + SESSION_HOURS * 3600:
             return None
-        mac = self.sign("session:v1", m.group(1))
-        return self.creds()[0] if mac and hmac.compare_digest(mac.encode(), m.group(2).encode()) else None
+        p = self.principal(m.group(1))
+        return p if p and hmac.compare_digest(self.sign("session:v2", p, m.group(2)).encode(), m.group(3).encode()) else None
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):  # bounded threads: refuse instead of growing without limit
@@ -2197,6 +2608,7 @@ def selftest_http():
             return e.code, dict(e.headers), e.read()
     good = selftest_login(srv, get, host)
     assert get("/static/app.css", auth=None)[0] == 200 and get("/static/../web_auth", auth=None)[0] == 404
+    assert get("/static/favicon.svg", auth=None)[1]["Content-Type"] == "image/svg+xml"
     code, hd, body = get("/no-such-page", auth=None)
     assert code == 404 and b"Page not found" in body and "script-src 'self'" in hd["Content-Security-Policy"]
     assert get("/no-such-page")[0] == 404 and get("/rec/2026-11-06/000000_clip.mp4", auth=None)[0] == 401
@@ -2211,7 +2623,7 @@ def selftest_http():
     assert get("/attendance?date=2026-02-30")[0] == 400 and get("/csv?date=../x")[0] == 400
     code, hd, body = get("/static/app.js", headers={"Range": "bytes=0-9"})
     assert code == 206 and len(body) == 10 and hd["Content-Range"].startswith("bytes 0-9/")
-    form = ("csrf=%s&action=nothing" % srv.sign("csrf:v1")).encode()
+    form = ("csrf=%s&action=nothing" % srv.csrf_for(srv.owner())).encode()
     # no Origin: refused; wrong token: refused; right token and origin, unknown action: refused by the whitelist
     assert get("/")[1].get("Referrer-Policy") == "same-origin"  # under no-referrer Chrome posts "Origin: null"
     for hd, d in (({}, form), ({"Origin": "http://" + host}, b"csrf=bad&action=start"), ({"Origin": "null"}, form),
@@ -2220,8 +2632,9 @@ def selftest_http():
         assert code == 303 and h2["Location"] == "/system?msg=denied", (hd, code, h2.get("Location"))
     assert get("/system/service", data=b"x" * (MAX_BODY + 1), headers={"Origin": "http://" + host})[0] == 413
     selftest_registration(get, host)
-    selftest_cameras(get, host, srv.sign("csrf:v1"))
-    selftest_uploads(get, host, srv.sign("csrf:v1"))
+    selftest_cameras(get, host, srv.csrf_for(srv.owner()))
+    selftest_uploads(get, host, srv.csrf_for(srv.owner()))
+    selftest_accounts(srv, get, host, good)
     srv.shutdown()
     os.remove(srv.auth_file)
 
@@ -2252,25 +2665,170 @@ def selftest_login(srv, get, host):
     assert "HttpOnly" in h["Set-Cookie"] and "SameSite=Lax" in h["Set-Cookie"] and "Domain" not in h["Set-Cookie"]
     cookie = h["Set-Cookie"].split(";")[0]
     tok = cookie.split("=", 1)[1]
-    assert get("/", auth=cookie)[0] == 200 and srv.session_user(tok) == "admin"
+    assert get("/", auth=cookie)[0] == 200 and srv.session_principal(tok)["uid"] == "owner" and tok.startswith("v2.owner.")
     assert get("/login", auth=cookie)[0] == 303  # signed in already
     exp = int(time.time()) - 1  # expired, tampered, malformed, too far ahead: all signed out
-    for t in (srv.session_token(exp), tok[:-1] + ("0" if tok[-1] != "0" else "1"), "v1.x.y", "\u00e9" * 50,
-              srv.session_token(int(time.time()) + SESSION_HOURS * 3600 + 60)):
+    v1 = "v1.%d.%s" % (int(time.time()) + 60, "0" * 64)  # cookies of v1.8 and earlier: signed out once (D-040)
+    for t in (srv.session_token(srv.owner(), exp), tok[:-1] + ("0" if tok[-1] != "0" else "1"), "v1.x.y", v1, "\u00e9" * 50,
+              srv.session_token(srv.owner(), int(time.time()) + SESSION_HOURS * 3600 + 60), tok.replace("v2.owner.", "v2.u_" + "0" * 16 + ".")):
         assert get("/", auth=COOKIE + "=" + t)[0] == 303, t
     other = Server(("127.0.0.1", 0), Handler)  # a restart reads the same key: still signed in
     other.auth_file = srv.auth_file
-    assert other.session_user(tok) == "admin" and other.sign("csrf:v1") == srv.sign("csrf:v1")
+    assert other.session_principal(tok)["uid"] == "owner" and other.csrf_for(other.owner()) == srv.csrf_for(srv.owner())
     other.server_close()
-    form = ("csrf=%s" % srv.sign("csrf:v1")).encode()
+    form = ("csrf=%s" % srv.csrf_for(srv.owner())).encode()
     code, h, _ = get("/logout", auth=cookie, headers=o, data=form)
     assert code == 303 and h["Location"] == "/login" and "Max-Age=0" in h["Set-Cookie"]
-    old_csrf = srv.sign("csrf:v1")
+    old_csrf = srv.csrf_for(srv.owner())
     write_auth(srv.auth_file, "admin", "secret123")  # a new password (same text, new salt) ends sessions and forms
-    assert get("/", auth=cookie)[0] == 303 and srv.sign("csrf:v1") != old_csrf
+    assert get("/", auth=cookie)[0] == 303 and srv.csrf_for(srv.owner()) != old_csrf
     fresh = login("admin", "secret123")[1]["Set-Cookie"].split(";")[0]
     assert get("/", auth=fresh)[0] == 200
     return fresh
+
+
+def selftest_accounts(srv, get, host, owner_cookie):
+    """users and roles (D-040): links, sign-in names, the viewer's routes, revocation, cooldown, closed on DB failure"""
+    import tempfile
+    o = {"Origin": "http://" + host}
+    tok = srv.csrf_for(srv.owner())
+
+    def post(path, fields, cookie=None, headers=o):
+        return get(path, auth=cookie or owner_cookie, headers=headers, data="&".join(
+            "%s=%s" % (k, quote(v, safe="")) for k, v in dict(fields, csrf=fields.get("csrf", tok)).items()).encode())
+
+    def login(ident, pw, nxt="/"):
+        return get("/login", auth=None, headers=o, data=("user=%s&password=%s&next=%s" % (quote(ident), quote(pw), quote(nxt, safe=""))).encode())
+    assert norm_email(" Fam@Example.COM ") == "fam@example.com" and norm_email("x@y") is None
+    assert norm_phone("+91 98765-43210") == "+919876543210" and norm_phone("9876543210") is None and norm_phone("+0123456789") is None
+    assert pw_problem("short") and pw_problem("fam@example.com", "Fam", "fam@example.com") and not pw_problem("correct horse battery")
+    g = globals()
+    saved = g["PUBLIC_URL"]
+    for v, want in (("https://att.example.com", "https://att.example.com"), ("http://att.example.com", ""),
+                    ("https://att.example.com/x", ""), ("https://u@att.example.com", ""), ("", "")):
+        g["PUBLIC_URL"] = v
+        assert public_origin() == want, v
+    g["PUBLIC_URL"] = saved
+    # add: the admin's own password first; then the link is shown once
+    assert post("/users/add", {"name": "Family", "role": "viewer", "email": "Fam@Example.com", "current": "wrong"})[1]["Location"] == "/users?msg=u_reauth"
+    for bad in ({"phone": "98765 43210"}, {"email": "nope"}, {}):
+        assert post("/users/add", dict(bad, name="Family", role="viewer", current="secret123"))[1]["Location"] == "/users?msg=u_bad", bad
+    loc = post("/users/add", {"name": "Family", "role": "viewer", "email": "Fam@Example.com", "phone": "+91 98765 43210",
+                              "current": "secret123"})[1]["Location"]
+    assert loc.startswith("/users?msg=u_added&show="), loc
+    nonce = loc.rsplit("=", 1)[1]
+    uid, link, _ = SHOWN_LINKS[nonce]
+    page = get(loc)[2]
+    assert link.encode() in page and nonce not in SHOWN_LINKS  # shown once
+    assert post("/users/add", {"name": "Other", "role": "viewer", "email": "fam@example.com", "current": "secret123"})[1]["Location"] == "/users?msg=u_taken"
+    assert post("/users/add", {"name": "Other", "role": "viewer", "phone": "+919876543210", "current": "secret123"})[1]["Location"] == "/users?msg=u_taken"
+    # the link: viewing does not use it up; a weak password is refused; then it works once
+    assert b"Set your password" in get("/account/setup?t=" + link, auth=None)[2] and b"Set your password" in get("/account/setup?t=" + link, auth=None)[2]
+    setup = lambda t, pw, again=None: get("/account/setup", auth=None, headers=o, data=("t=%s&password=%s&again=%s" % (
+        t, quote(pw), quote(again if again is not None else pw))).encode())
+    assert setup(link, "too short")[0] == 400 and setup(link, "correct horse battery", "other words here")[0] == 400
+    assert login("fam@example.com", "correct horse battery")[0] == 401  # no password yet
+    code, h, _ = setup(link, "correct horse battery")
+    assert code == 303 and h["Location"] == "/login?msg=pw_set" and setup(link, "correct horse battery")[0] == 403
+    assert b"Link not valid" in get("/account/setup?t=" + link, auth=None)[2] and get("/account/setup", auth=None, headers={"Origin": "http://evil"},
+                                                                                    data=b"t=x&password=y&again=y")[0] == 403
+    # concurrent use of one link: one wins
+    t2 = issue_link(uid)
+    res = []
+    th = [threading.Thread(target=lambda: res.append(redeem_link(t2, "another long passphrase"))) for _ in range(2)]
+    for x in th:
+        x.start()
+    for x in th:
+        x.join()
+    assert sorted(r is None for r in res) == [False, True], res
+    set_account_password(uid, "correct horse battery")
+    # sign in by email (any case) or phone (any format); next is checked against the role
+    code, h, _ = login("FAM@example.com", "correct horse battery", "/users")
+    assert code == 303 and h["Location"] == "/", h.get("Location")
+    viewer = h["Set-Cookie"].split(";")[0]
+    assert login("+91 (98765) 43210", "correct horse battery")[0] == 303 and login("nobody@example.com", "x" * 20)[0] == 401
+    # the viewer sees everything read-only and nothing else
+    for path in ("/", "/live", "/attendance", "/api/status", "/api/health", "/system", "/cameras", "/account", "/csv?date=2026-11-06"):
+        assert get(path, auth=viewer)[0] == 200, path
+    assert b"href='/users'" not in get("/", auth=viewer)[2] and b"href='/users'" in get("/", auth=owner_cookie)[2]
+    sysv, syso = get("/system", auth=viewer)[2], get("/system", auth=owner_cookie)[2]
+    assert b"/system/service" not in sysv and b"/system/matching" not in sysv and b"/system/matching" in syso
+    camv = get("/cameras", auth=viewer)[2]
+    assert b"<form method=\"post\" action=\"/cameras" not in camv and b"action='/cameras" not in camv and b"Cameras</h1>" in camv
+    for path in ("/people", "/uploads", "/users", "/pending/0123456789ab/1.jpg",
+                 "/uploads/" + "a" * 16 + "/result.mp4"):
+        assert get(path, auth=viewer)[0] == 403, path
+    vt = srv.csrf_for(srv.principal(uid))
+    for path in ("/system/service", "/cameras/add", "/people/invite", "/users/add", "/uploads/delete", "/system/matching"):
+        assert post(path, {"action": "stop", "csrf": vt}, cookie=viewer)[0] == 403, path
+    assert get("/uploads/add", auth=viewer, headers=dict(o, **{"X-CSRF": vt}), data=b"x" * 1000)[0] == 403
+    assert post("/logout", {"csrf": tok}, cookie=viewer)[1]["Location"] == "/?msg=denied"  # another user's form token
+    # role change and back: the old cookies do not come back (version, D-040)
+    assert post("/users/role", {"id": uid, "role": "admin", "current": "secret123"})[1]["Location"] == "/users?msg=u_role"
+    assert get("/", auth=viewer)[0] == 303
+    admin_cookie = login("fam@example.com", "correct horse battery")[1]["Set-Cookie"].split(";")[0]
+    assert get("/users", auth=admin_cookie)[0] == 200
+    post("/users/role", {"id": uid, "role": "viewer", "current": "secret123"})
+    assert get("/users", auth=admin_cookie)[0] == 303 and get("/", auth=viewer)[0] == 303
+    # own password: the current one first; then every session of that account ends
+    viewer = login("fam@example.com", "correct horse battery")[1]["Set-Cookie"].split(";")[0]
+    vt = srv.csrf_for(srv.principal(uid))
+    assert post("/account/password", {"csrf": vt, "current": "wrong", "password": "brand new passphrase", "again": "brand new passphrase"},
+                cookie=viewer)[1]["Location"] == "/account?msg=pw_wrong"
+    assert post("/account/password", {"csrf": vt, "current": "correct horse battery", "password": "fam@example.com", "again": "fam@example.com"},
+                cookie=viewer)[1]["Location"] == "/account?msg=pw_weak"
+    assert post("/account/password", {"csrf": vt, "current": "correct horse battery", "password": "brand new passphrase",
+                                      "again": "brand new passphrase"}, cookie=viewer)[1]["Location"] == "/login"
+    assert get("/", auth=viewer)[0] == 303
+    viewer = login("fam@example.com", "brand new passphrase")[1]["Set-Cookie"].split(";")[0]
+    # a download stops when access ends (checked every 2 MB or 3 s)
+    rec = tempfile.mkdtemp()
+    saved_rec = g["REC_DIR"]
+    g["REC_DIR"] = rec
+    try:
+        os.makedirs(os.path.join(rec, "2026-11-06"))
+        with open(os.path.join(rec, "2026-11-06", "000000_9.jpg"), "wb") as f:
+            f.write(b"\0" * (24 << 20))
+        s = socket.create_connection(("127.0.0.1", srv.server_address[1]))
+        s.sendall(("GET /rec/2026-11-06/000000_9.jpg HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\nConnection: close\r\n\r\n" % (host, viewer)).encode())
+        s.settimeout(10)
+        got = len(s.recv(65536))
+        post("/users/delete", {"id": uid, "current": "secret123"})  # deleting the account ends its sign-in at once
+        while True:
+            d = s.recv(1 << 20)
+            if not d:
+                break
+            got += len(d)
+        s.close()
+        assert got < (20 << 20), got
+    finally:
+        g["REC_DIR"] = saved_rec
+        shutil.rmtree(rec, ignore_errors=True)
+    assert get("/", auth=viewer)[0] == 303 and srv.principal(uid) is None and not link_account(t2)
+    # per-account pause after 5 failures, even with the right password; then it passes again
+    uid2 = "u_" + "1" * 16
+    with _db_lock, db() as c:
+        c.execute("INSERT INTO users (id, name, email, role, version, created) VALUES (?,?,?,?,0,?)", (uid2, "Aunt", "aunt@example.com", "viewer", time.time()))
+    set_account_password(uid2, "aunt long passphrase")
+    srv.fails.clear()  # the per-visitor limit is not what this checks
+    for _ in range(5):
+        assert login("aunt@example.com", "wrong but long enough")[0] == 401
+    assert login("aunt@example.com", "aunt long passphrase")[0] == 429
+    srv.acct_ok(uid2)
+    srv.fails.clear()
+    code, h, _ = login("aunt@example.com", "aunt long passphrase")
+    assert code == 303
+    aunt = h["Set-Cookie"].split(";")[0]
+    # the database fails: nobody but the owner gets in (closed)
+    saved_db = g["DB_PATH"]
+    g["DB_PATH"] = os.path.join(rec, "missing", "web.db")  # a folder that does not exist: sqlite cannot open it
+    try:
+        assert get("/", auth=aunt)[0] == 303 and get("/", auth=owner_cookie)[0] == 200
+    finally:
+        g["DB_PATH"] = saved_db
+    with _db_lock, db() as c:
+        c.execute("DELETE FROM users")
+        c.execute("DELETE FROM account_links")
 
 
 def selftest_cameras(get, host, tok):

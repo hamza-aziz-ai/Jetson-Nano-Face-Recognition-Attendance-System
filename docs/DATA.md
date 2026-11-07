@@ -9,6 +9,7 @@ All data lives on the device. None of it is in the repository.
 | Web log | `logs/<year>/<Month>/web.log` | Text lines | Failed logins and refused requests with the client address, service actions | Kept (no retention rule set by the owner) |
 | Pending registrations | `data/registrations/<id>/n.jpg` (0700) | JPEG, re-encoded, at most 1600 px | Faces of people who registered | Rejected: deleted at once; unreviewed: 7 days; approved: moved into `gallery/` |
 | Registration records | `data/web.db` | sqlite3 | Invitation hashes, names, consent version and time, status | Kept (no retention rule set) |
+| User accounts | `data/web.db`, tables `users`, `account_links` | sqlite3 | Names, emails, phone numbers, roles, salted PBKDF2 hashes, last sign-in; hashed set-password links | Until the account is deleted; links 48 h |
 | Display names | `data/people.json` | JSON | Name for each opaque person key | Until the person is removed |
 | Camera setup | `data/cameras.json`, `data/cameras.active` (0600), `*.prev` | JSON, one text line | Camera choice, RTSP addresses with logins | Until changed on the Cameras page |
 | Tunnel token | `/etc/cloudflared/facepipe-tunnel.env` (root, 0600) | `TUNNEL_TOKEN=` | The secret that lets cloudflared serve the site's hostname | Until the owner replaces or deletes the tunnel |
