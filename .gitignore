@@ -2,6 +2,7 @@
 web_auth
 rtsp_auth
 facepipe.env
+gh_token
 data/
 logs/
 gallery/

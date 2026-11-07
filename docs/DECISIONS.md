@@ -459,3 +459,19 @@ Trade-off: the compile takes 5 m 40 s on the Nano and is added to every automati
 Also needed before a client install, neither of them technical: the repository goes private (the owner is doing this), and the InsightFace models are licensed for non-commercial use only, so they must be replaced or licensed.
 
 Revisit if: the compile time becomes a problem for deploys, a client needs a build for a different Python or architecture, or the models' licence is settled and the terms change what has to be protected.
+
+## D-044: A read-only token on the device for the private repository (owner)
+The owner made the repository private on 2026-11-07, before installing the system at a client. `deploy/update.sh` read the release list from `api.github.com` without credentials and `deploy/deploy.sh` cloned the tag over plain HTTPS; both became 404 the moment the repository turned private, and the device would have sat on its version forever while logging "offline?" every ten minutes.
+Options:
+
+1. A fine-grained personal access token on the device, Contents: read
+2. An SSH deploy key
+3. Keep publishing releases to a second, public repository
+
+Chosen: 1. The owner creates the token and writes it to `<app_dir>/gh_token` (mode 0600); no agent ever types or reads it. Both scripts read that file and pass the value through the environment: the API request sends `Authorization: token ...`, and `git clone` gets it from a one-line credential helper. The token is never a command-line argument (`ps` shows those to every user on the machine) and never part of a URL (git stores those in the clone's config). Without the file the scripts behave as before and say exactly what is missing, instead of blaming the network. `gh_token` is in `.gitignore` and `ci/scan.sh` refuses to commit it.
+
+Why: a token is one file, works for both the API and the clone, and can be scoped to this repository with read access to its contents only. A deploy key (2) covers the clone but not the release API, so it would need a second mechanism. A public mirror (3) gives back exactly the exposure that making the repository private was meant to remove.
+
+Trade-off: a long-lived credential now sits on the device, so anyone with the file can read the repository's source; that is why its scope is one repository, read-only, and why `web.py` ships compiled (D-043). A fine-grained token also expires, and when it does, updates stop with the warning above rather than failing loudly. A client install needs its own token, not a copy of the owner's.
+
+Revisit if: a client install needs updates without giving the device any credential (publish signed release tarballs to a download host instead), or a token expiry is missed and the silence is judged too quiet.

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-11-07
+
+### Fixed
+
+- The repository is now private, which silently stopped automatic updates: reading the release list and cloning a tag both need credentials. Both scripts now read a read-only token from `<app_dir>/gh_token` (mode 0600, created by the owner) and pass it through the environment, never on a command line or in a URL. Without the file they say exactly that instead of reporting the device as offline (D-044).
+
 ## [1.13.0] - 2026-11-07
 
 ### Changed
