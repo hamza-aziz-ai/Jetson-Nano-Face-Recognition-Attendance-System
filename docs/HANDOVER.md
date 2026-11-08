@@ -72,7 +72,8 @@ The system was built from scratch in one day on the owner's Jetson Nano 4 GB (Je
 2. CSI test after R8 removal.
 3. A face quality score beyond the size gate.
 4. License decision for the repository (owner). There is no `LICENSE` file, so the public repository is all rights reserved by default; the CCTV session asked for this pipeline's code on 2026-11-08 and was pointed at the owner.
-5. Sample the faces-present thermal curve. The empty-scene curve was measured on 2026-11-08 (plateau AO 55.2 / CPU 48.3 °C after about 20 min); the hot case needs someone in front of the camera for 20 min, so it pairs with the D-042 calibration session.
+5. Portfolio card for hamzaaziz.dev (asked 2026-11-08): four owner decisions before it is published — the project's real start date (the git history begins 2026-11-06 and is not the start), personal versus employer attribution (this repo is the Nano, not the Orin Nano of the CV's four variants), whether any demo URL is published (`attendance.hamzaaziz.dev` points at the owner's own device holding two people's real embeddings behind the site's sign-in only, so publishing it is not advised), and whether a dashboard screenshot is produced with synthetic faces. No accuracy figure exists to quote: the cosine 0.97-0.99 is agreement with a reference implementation, not recognition accuracy.
+6. Sample the faces-present thermal curve. The empty-scene curve was measured on 2026-11-08 (plateau AO 55.2 / CPU 48.3 °C after about 20 min); the hot case needs someone in front of the camera for 20 min, so it pairs with the D-042 calibration session.
 
 ### Do not touch
 
