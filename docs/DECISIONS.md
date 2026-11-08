@@ -475,3 +475,21 @@ Why: a token is one file, works for both the API and the clone, and can be scope
 Trade-off: a long-lived credential now sits on the device, so anyone with the file can read the repository's source; that is why its scope is one repository, read-only, and why `web.py` ships compiled (D-043). A fine-grained token also expires, and when it does, updates stop with the warning above rather than failing loudly. A client install needs its own token, not a copy of the owner's.
 
 Revisit if: a client install needs updates without giving the device any credential (publish signed release tarballs to a download host instead), or a token expiry is missed and the silence is judged too quiet.
+
+## D-045: The threat model stays public, and the demo link keeps the sign-in page as its only lock (owner)
+
+On 2026-11-08 the dashboard address was linked from the portfolio site (`hamzaaziz.dev/#jetson-nano-attendance`). The device behind it holds two real people's embeddings and face snapshots, and Cloudflare Access was removed earlier at the owner's request (D-035 update), so the sign-in page is the whole perimeter. The portfolio session then asked for `docs/THREAT.md` to be deleted from the public repository, on the grounds that it tells a reader exactly what that perimeter is.
+Options:
+
+1. Remove the threat model from the repository (and optionally rewrite the history)
+2. Keep it but redact the hostname and the perimeter specifics
+3. Keep it public and close the hole instead: Cloudflare Access in front of the tunnel, or a separate instance with invented faces as the demo
+4. Keep it public and accept the exposure
+
+Chosen: 4, by the owner, after 3 was recommended. The threat model stays in the repository, complete and unredacted, and the live board stays linked with the sign-in password as its only lock.
+
+Why: deleting the document does not change what an attacker can reach, and `CLAUDE.md` requires THREAT as part of the docs set, so removing it would have been a new rule rather than the existing one. Removal also hides the one artefact that lets a reader judge the system honestly. The controls that are actually in front of the data are not secret-dependent: PBKDF2 hashing, a 15-character minimum, ten failed attempts per visitor per 15 minutes, a per-account pause of up to 30 s after five failures, at most two hashes at once, and the same work for unknown names. A published threat model does not weaken any of them.
+
+Trade-off: the repository now tells anyone that one password protects two people's biometric data on a device whose address is on a public page, which raises the value of guessing it and removes the small protection of nobody knowing the host. A password-guessing campaign spread across many addresses still gets ten tries per address. This is an accepted risk, not a mitigated one. History rewriting was also declined as a remedy: forks, existing clones and orphaned commits by SHA keep old content reachable, and `main` is protected by five required checks, so a force-push would mean bypassing them for little gain.
+
+Revisit if: the password is ever shared or reused, a sign-in lockout burst shows real guessing traffic in the logs, the gallery grows beyond the household, or the card is pointed at a synthetic-face instance, at which point Access can go back on without costing the demo anything.
