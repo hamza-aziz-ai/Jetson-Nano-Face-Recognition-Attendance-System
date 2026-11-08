@@ -1,6 +1,6 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-08 2:54 AM IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`). Finished work lives in `CHANGELOG.md`, the reasoning in `docs/DECISIONS.md`, past sessions in `docs/HANDOVER.md`.
+Snapshot: **2026-11-08 8:41 AM IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`). Finished work lives in `CHANGELOG.md`, the reasoning in `docs/DECISIONS.md`, past sessions in `docs/HANDOVER.md`.
 
 ## Versions
 
@@ -11,10 +11,11 @@ Snapshot: **2026-11-08 2:54 AM IST**. Volatile state; verify before acting (see 
 
 ## What runs on the device now
 
-- Jetson Nano 4 GB, JetPack 4.6.6, app on the microSD at `~/facepipe`. Both services active; recognition at about 14.8 fps on the owner's **phone over RTSP** (chosen on the Cameras page). Face matching L2 ≤ 0.90. A USB webcam and the CSI camera are also available; a USB camera is saved by its `/dev/v4l/by-id/...` path.
+- Jetson Nano 4 GB, JetPack 4.6.6, app on the microSD at `~/facepipe`. Both services active; recognition at about 14.9 fps on the **USB camera** (selected on the Cameras page on 2026-11-08). Face matching L2 ≤ 0.90. The owner's phone over RTSP and the CSI camera are the other options; a USB camera is saved by its `/dev/v4l/by-id/...` path.
+- If the selected camera is the phone over RTSP and the phone is not streaming, `facepipe` fails with `Could not open resource for reading and writing ... gst_rtspsrc_retrieve_sdp` and systemd restarts it every ~21 s (restart counter reached 171 on 2026-11-08). `systemctl is-active` still answers `active` between restarts, so check `data/status.json` freshness, not just the unit state.
 - The website runs as `webapp.so` with a two-line `web.py` that starts it (D-043). There is **no source on the device**: no `.cpp`, no `.py` beyond that stub, no `__pycache__`, and `.prev` holds compiled files. A deploy compiles on the device, which needs Nuitka 4.3.4 and takes 5 m 40 s idle, about 7 m 30 s while recognition runs.
 - Credentials: `web_auth`, `rtsp_auth` and `data/cameras.json` (all 0600), plus `gh_token` (0600, fine-grained, one repository, Contents: read) for updates while the repository is private. The owner's SSH key, the `gh` login and the `NVIDIA-SDK-Manager` key were removed on 2026-11-07; `authorized_keys` keeps two keys.
-- Heat: AO about 87 °C and CPU about 81 °C while recognition runs, which is normal for this board (the CPU throttles at 97 °C). `soctherm: OC ALARM` appears because it runs from a phone charger over micro-USB.
+- Heat tracks the **detection duty cycle**, not uptime (measured 2026-11-08, 15 s samples over 31 min). Empty scene, detection every 6th frame: plateau at AO 55.2 °C / CPU 48.3 °C after about 20 min, from AO 44.0 / CPU 38.5 idle; the rise has two time constants, about 2.5 min die-to-heatsink then about 8 min heatsink-to-air. Faces present, detection every frame plus an ArcFace embedding per track: AO about 87 °C / CPU about 81 °C. Both are normal for this board (CPU throttles at 97 °C, AO critical 110 °C). `soctherm: OC ALARM` appears because it runs from a phone charger over micro-USB. The faces-present curve has not been sampled yet; it needs someone in front of the camera for 20 min.
 - The installed systemd units predate `deploy/install.sh`; re-run the installer only with the owner's approval.
 
 ## Remote access (D-035, D-036, D-037)
@@ -38,3 +39,5 @@ Done on 2026-11-08: the SSH key `SHA256:liIG…6M0` ("Hamza-Jetson-Nano") and th
 - Self-hosted runner: the owner registers it (token never typed by an agent); restricted user and sudo rule need exact-command approval.
 - MLOps model manifest; LFW evaluation (download needs owner permission); **licence choice — the InsightFace models are non-commercial, so a paid client install is not allowed as things stand.**
 - Client installs: a client device needs its own token, not a copy of the owner's, and an image that never carried the SDK-Manager key.
+- **`tracker.yml` is missing from a fresh install:** `.gitignore` line 12 ignores it, but `deploy/deploy.sh` line 54 copies it from the clone. Only a device that already holds the file survives a deploy — this Nano does, since 2026-11-06. A clean client install leaves `nvtracker` with `ll-config-file=<app_dir>/tracker.yml` pointing at nothing. The file is NVIDIA's `config_tracker_IOU.yml` verbatim (MIT header), so committing it with the notice kept is allowed. Code change: needs a branch and a pull request.
+- **No `LICENSE` file:** the public repository is all rights reserved by default. The CCTV session asked for this pipeline's code on 2026-11-08 and was told to put the question to the owner before copying any of it.

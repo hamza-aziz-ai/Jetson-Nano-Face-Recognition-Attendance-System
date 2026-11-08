@@ -64,13 +64,15 @@ The system was built from scratch in one day on the owner's Jetson Nano 4 GB (Je
 ### Broken
 
 - Nothing known in the running system. Event clips, full-frame evidence and RTSP playback are implemented but have not been seen end to end with a face in front of the camera.
+- A fresh install has no `tracker.yml`: `.gitignore` ignores it while `deploy/deploy.sh` copies it from the clone, so `nvtracker` would start with `ll-config-file` pointing at a missing file. Devices that already hold the file, including this Nano, are unaffected. Fix is to commit NVIDIA's `config_tracker_IOU.yml` (MIT, notice kept) through a pull request.
 
 ### Next
 
 1. End-to-end test of an event clip, full-frame evidence and RTSP playback in VLC (needs the RTSP login: `python3 web.py --set-rtsp-password <user>`).
 2. CSI test after R8 removal.
 3. A face quality score beyond the size gate.
-4. License decision for the repository (owner).
+4. License decision for the repository (owner). There is no `LICENSE` file, so the public repository is all rights reserved by default; the CCTV session asked for this pipeline's code on 2026-11-08 and was pointed at the owner.
+5. Sample the faces-present thermal curve. The empty-scene curve was measured on 2026-11-08 (plateau AO 55.2 / CPU 48.3 °C after about 20 min); the hot case needs someone in front of the camera for 20 min, so it pairs with the D-042 calibration session.
 
 ### Do not touch
 

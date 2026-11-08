@@ -7,6 +7,7 @@ Keep this file and `CLAUDE.md` synchronized (CI fails if they differ). They hold
 1. Read `MEMORY.md` completely.
 2. Verify its snapshot: `git log -1`, `git status`, the latest CI run for that exact commit, and on the device `cat <app_dir>/data/status.json` and `systemctl is-active facepipe facepipe-web`.
 3. Update `MEMORY.md` in the same commit whenever the state it describes changes (release, deploy, open item closed or added).
+4. **Before reporting any task done,** update `CLAUDE.md`, `AGENTS.md`, `MEMORY.md`, `README.md` and every affected file in `docs/`. Owner's standing rule: measurements, new gaps and changed device state belong in the documents, not only in the chat.
 
 ## What this is
 
