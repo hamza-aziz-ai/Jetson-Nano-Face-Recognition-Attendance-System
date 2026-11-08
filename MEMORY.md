@@ -1,6 +1,6 @@
 # Project Memory: Read This First
 
-Snapshot: **2026-11-07 11:55 PM IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`). Finished work lives in `CHANGELOG.md`, the reasoning in `docs/DECISIONS.md`, past sessions in `docs/HANDOVER.md`.
+Snapshot: **2026-11-08 2:54 AM IST**. Volatile state; verify before acting (see "Start here" in `CLAUDE.md`). Finished work lives in `CHANGELOG.md`, the reasoning in `docs/DECISIONS.md`, past sessions in `docs/HANDOVER.md`.
 
 ## Versions
 
@@ -26,7 +26,7 @@ Snapshot: **2026-11-07 11:55 PM IST**. Volatile state; verify before acting (see
 
 ## Next (owner)
 
-1. **Power:** a 5 V 4 A barrel supply with the J48 jumper is ordered, expected by **10 November 2026**. It fixes the `OC ALARM` entries and the clock drops, not the temperature. The final two-camera numbers (D-039) wait for it.
+1. **Hardware on the way, all expected by 10 November 2026:** a 5 V 4 A barrel supply with the J48 jumper, a fan, and a case. The supply fixes the `OC ALARM` entries and the clock drops, not the temperature; the fan is what lowers the temperature (40 mm 5 V on the J15 PWM header, then `sudo jetson_clocks --fan` or an `nvfancontrol` profile). The final two-camera numbers (D-039) wait for the supply. Assembling the case is also when the Wi-Fi radio can be turned on.
 2. **Two cameras:** reconnect test, switching the phone stream off and on.
 3. **RTSP from mobile data:** expect 403 (D-041); still untested.
 
