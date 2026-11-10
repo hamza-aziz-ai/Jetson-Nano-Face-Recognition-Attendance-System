@@ -28,7 +28,7 @@ Snapshot: **2026-11-08 8:41 AM IST**. Volatile state; verify before acting (see 
 
 ## Next (owner)
 
-1. **Case and fan fitted, Wi-Fi on (2026-11-10):** the board runs in its case with the 40 mm 5 V fan on the J15 PWM header, and the fan's effect is now measured (D-046). `nmcli radio wifi on` cleared the rfkill soft block and persists across reboot. Two Wi-Fi profiles for the same SSID carry the same static address and both autoconnect; deleting the spare is waiting on the owner's word. Still open from this item: whether the 5 V 4 A barrel supply with the J48 jumper is in use, since that is what fixes the `OC ALARM` entries and the clock drops rather than the temperature, and the final two-camera numbers (D-039) that wait for it.
+1. **Case and fan fitted, Wi-Fi on (2026-11-10):** the board runs in its case with the 40 mm 5 V fan on the J15 PWM header, and the fan's effect is now measured (D-046). `nmcli radio wifi on` cleared the rfkill soft block and persists across reboot. The duplicate Wi-Fi profile is gone (2026-11-10, owner approved): one profile for the SSID now. The one deleted was the **inactive** twin, not the one whose name looked spare - the profile named with the trailing `1` is the live one, so deleting by name would have dropped the link. Still open from this item: whether the 5 V 4 A barrel supply with the J48 jumper is in use, since that is what fixes the `OC ALARM` entries and the clock drops rather than the temperature, and the final two-camera numbers (D-039) that wait for it.
 2. **Two cameras:** reconnect test, switching the phone stream off and on.
 3. **RTSP from mobile data:** expect 403 (D-041); still untested.
 
