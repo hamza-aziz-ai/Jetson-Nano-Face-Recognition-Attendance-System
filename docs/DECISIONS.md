@@ -493,3 +493,30 @@ Why: deleting the document does not change what an attacker can reach, and `CLAU
 Trade-off: the repository now tells anyone that one password protects two people's biometric data on a device whose address is on a public page, which raises the value of guessing it and removes the small protection of nobody knowing the host. A password-guessing campaign spread across many addresses still gets ten tries per address. This is an accepted risk, not a mitigated one. History rewriting was also declined as a remedy: forks, existing clones and orphaned commits by SHA keep old content reachable, and `main` is protected by five required checks, so a force-push would mean bypassing them for little gain.
 
 Revisit if: the password is ever shared or reused, a sign-in lockout burst shows real guessing traffic in the logs, the gallery grows beyond the household, or the card is pointed at a synthetic-face instance, at which point Access can go back on without costing the demo anything.
+
+## D-046: Leave the fan profile as NVIDIA ships it until the faces-present curve is measured in the case
+
+Measured 2026-11-10: 125 samples at 15 s (31.1 min), empty scene, in the case with the 40 mm fan on the J15 PWM header, same protocol as the fanless run of 2026-11-08. No council: the alternatives are one config line each and reversible.
+
+| | fanless, 2026-11-08 | in the case with the fan, 2026-11-10 |
+| --- | --- | --- |
+| AO | plateau 55.2 °C after about 20 min | never plateaus: the fan intervenes at 50.0-51.5 °C |
+| CPU | plateau 48.3 °C | peak 44.5 °C |
+| fps | 15.0 | 14.6-15.2, unchanged through every fan burst |
+| cpufreq | no throttling | 1224-1479 MHz, tracks load, no thermal cap |
+
+The fan was commanded three times in 31 minutes. The trigger is consistent: `thermal-fan-est` 42.25-43.75 °C, which is AO 50.0-51.5 °C. The release is not. Twice the target went back to 0 after a single 15 s interval, with the fan having reached only 104 and 147 of 255 PWM, for a 2.5-3.5 °C drop. The third time it held 255 PWM for 3.5 minutes and took AO from 50.5 down to 34.0 °C, 16 °C below the band that triggered it. That cooldown is spent in about 6 minutes: the fanless ramp is +0.80 °C/min AO, but the reheat from 34 °C is +2.76 °C/min, so cooling deep buys less time than it looks.
+
+Options:
+
+1. Leave the profile as it ships
+2. Widen the hysteresis so a burst always runs to completion
+3. Raise the trigger so an empty scene never spins the fan
+4. Cap the PWM so no burst over-cools
+
+Chosen 1. With the fan the empty scene sits 45.5 °C below the 97 °C CPU throttle, and without it 42 °C below, so on this load the fan is noise rather than cooling and there is nothing here worth tuning for. The load that needs the fan is faces present, where the fanless board reaches AO 87 °C / CPU 81 °C, 10 °C from the throttle - and that curve has never been sampled in the case. Tuning a fan profile on the idle curve would be calibrating against the wrong load.
+
+Rejected: tuning any of options 2-4 now, on idle-curve data.
+Trade-off: the 15-second bursts stay (three in 31 min, 7.8 and 2.7 minutes apart), and one burst in three over-cools by 16 °C. Both are audible; neither is harmful.
+Revisit if: the faces-present curve in the case comes within 10 °C of the 97 °C throttle (then option 2 or 4), or the bursts annoy whoever sits near the device (then option 3).
+Not settled by this run: why two bursts were released after one interval and the third was not. The release points share no temperature (`thermal-fan-est` 40.75, 41.00 and 27.25 °C), so the governor holds state these columns do not carry; `/etc/nvfancontrol.conf` and the `nvfancontrol` state file would answer it. Nothing depends on the answer today.

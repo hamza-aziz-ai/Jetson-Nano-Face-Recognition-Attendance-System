@@ -179,6 +179,7 @@ Measured on a Jetson Nano 4 GB, MAXN power mode, JetPack 4.6.6.
 | Empty scene before adaptive detection (v1.0.3) | 12.2 fps, GPU 89-99% |
 | Temperature, empty scene, after 1 minute (CPU sensor) | 82 °C before, 77 °C after adaptive detection (v1.0.3) |
 | Temperature, empty scene, 31 min sampled every 15 s | plateau after about 20 min: AO 55.2 °C, CPU 48.3 °C (idle: AO 44.0, CPU 38.5); no throttling |
+| Temperature, empty scene, 31 min in the case with the 40 mm fan fitted | the fan caps AO at 50.0-51.5 °C instead of the 55.2 °C fanless plateau, CPU at 44.5 °C; three bursts, roughly 4 of the 31 minutes; 14.6-15.2 fps throughout, no throttling (D-046) |
 | Temperature, faces present (detection every frame) | AO about 87 °C, CPU about 81 °C (CPU throttles at 97, AO critical 110) |
 | 1080p H.264 file, detector on every frame, no video outputs | 19.2 fps (GPU bound) |
 | SCRFD-10G 640x384, TensorRT FP16 | 55 ms per frame |

@@ -2,6 +2,19 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## The fan measured in the case, and the thermal question closed: 2026-11-10 (model: Claude Opus 5)
+
+No release, documents only.
+
+### Done
+- **The 125-sample fan run is analysed** (D-046): 15 s samples over 31.1 min, empty scene, in the case with the 40 mm fan fitted. The fan is commanded at `thermal-fan-est` 42.25-43.75 °C (AO 50.0-51.5) and holds AO there instead of the 55.2 °C fanless plateau; CPU peaks at 44.5 °C. Throughput is untouched: 14.6-15.2 fps across all 125 samples, through every burst, with cpufreq in its load-driven 1224-1479 MHz range and no thermal cap.
+- **The profile stays as NVIDIA ships it.** The empty scene is 45.5 °C below the 97 °C CPU throttle with the fan and 42 °C below without it, so there is nothing to tune for. The load that needs the fan is faces present (AO 87 / CPU 81 fanless), and that curve has still not been sampled in the case; tuning on the idle curve would calibrate against the wrong load.
+- Two of the three bursts were released after a single 15 s interval, with the fan at 104 and 147 of 255 PWM. The third held full speed for 3.5 minutes and over-cooled AO to 34.0 °C, 16 °C below its own trigger band, which the board gives back in about 6 minutes (reheat +2.76 °C/min against a +0.80 °C/min fanless ramp). Why two were released and one was not is not answerable from these columns, and nothing depends on it.
+- `pmic` reads exactly 50.000 °C in all 125 samples: a constant, not a measurement. Do not chart it or alarm on it.
+
+### Next
+- The faces-present curve in the case is the only thermal question left open. It still needs someone in front of the camera for 20 minutes, so it still pairs with the D-042 calibration.
+
 ## Measurement, handover and two open gaps: 2026-11-08 (model: Claude Opus 5)
 
 No release. A day of measuring what was already shipped, and of handing the Orin to another project.

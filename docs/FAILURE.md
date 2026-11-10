@@ -17,6 +17,7 @@ Marked **seen** where it actually happened on the device, otherwise **from the c
 | Recordings volume full | Writes fail | Missing clips | Oldest week deleted at 90% (**from the code**, never triggered) |
 | Gallery file damaged | Lines skipped | Fewer photos in `gallery ... N photos` | Re-run enrollment |
 | Power loss at MAXN | Board resets | Uptime resets (**seen** once) | Services start on boot; fix: 5V 4A supply and fan |
+| Fan (40 mm on J15) stopped or unplugged | Nothing at an idle duty cycle: the empty scene plateaus at AO 55.2 °C, 42 °C below the CPU throttle. With faces present the board reaches AO 87 °C / CPU 81 °C, 10 °C from throttling | `fan_cur` stays 0 while `thermal-fan-est` is above 44 °C. Healthy operation looks like the opposite: 15-second bursts a few minutes apart, one in three running on to over-cool AO to 34 °C (**seen**, D-046) | None needed while the scene is empty; check the J15 header before a long faces-present run |
 | External SSD missing | Formerly: services could not start (**seen**) | | App moved to the microSD; SSD no longer used |
 | Clock wrong | Events on the wrong day | Wrong times on the page | NTP keeps it synced; set `TZ` in `facepipe.env` if the system clock is UTC |
 | CSI camera daemon stalls the pipeline at start | No frames, process looks active | Watchdog log line `no frames for 60 s` (**seen** once, before the watchdog existed) | Watchdog exits, systemd restarts after 10 s; `deploy.sh` waits 3 s between stop and start |
