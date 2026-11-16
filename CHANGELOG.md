@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-16
+
+### Added
+
+- A face the system cannot identify now keeps a number instead of being a nameless "unknown" every time. The same visitor seen again, today or next week, is the same number, so the website can say how many **different** faces a day held: a new "Different faces" card counts each name and each stranger once, however many visits they made, and the "Unknown faces" card now counts faces with the number of visits beneath it. The live view labels an unrecognised face "Unknown #7" rather than "Unknown", and each event line records which stranger it was. The numbers are kept for 30 days from the first sighting and then forgotten, so the device does not build up a lasting record of people it never identified (D-047).
+
+### Changed
+
+- The Attendance page's "Unknown faces" section is now called "Unknown visits", because that is what it lists: one picture per visit, several of which can be the same person.
+
 ## [1.13.7] - 2026-11-07
 
 ### Fixed

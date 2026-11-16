@@ -1,6 +1,6 @@
 # Flows
 
-Checked against the code of v1.13.7 (2026-11-07). When the code changes, fix the diagram, its key and its trace in the same commit.
+Checked against the code of v1.14.0 (2026-11-16). When the code changes, fix the diagram, its key and its trace in the same commit.
 
 ## How to read the diagrams
 
@@ -70,7 +70,7 @@ flowchart TD
 Key: `rec_worker`, `Gallery::reload_if_changed`, `embed`, `Gallery::match`, `passes`, `l2_of`, `repeat`, `seed_repeats`, `clip_trigger`, `certify_batch`, `offer_jpeg`, `save_evidence`, `log_event`, `write_bmp` (all in `facepipe.cpp`); settings `FACEPIPE_METRIC`, `FACEPIPE_MATCH`, `FACEPIPE_L2_MATCH`.
 
 1. `rec_worker` waits on the job queues; live faces always go before upload faces. A result is applied only if its track is still pending under the same key (camera, generation, track ID); otherwise it is counted as `stale` and labels nothing.
-2. `gallery.tsv` is reloaded when its modification time changes, so enrollment needs no restart.
+2. `gallery.tsv` is reloaded when its modification time changes, so enrollment needs no restart. `strangers.tsv` is read once at start, and pruned there: a face nobody enrolled keeps its number for 30 days from the first sighting, and a new one is appended the first time that face is logged, so `(13)` carries `unknown_id` (D-047).
 3. `embed` runs w600k_r50 on the RGB crop (x/127.5 - 1) and L2-normalises the 512-d result.
 4. `Gallery::match` takes the highest cosine over all enrolled photos.
 5. `passes` applies the chosen metric: cosine at least `FACEPIPE_MATCH` (default 0.5, default metric), or L2 distance at most `FACEPIPE_L2_MATCH` (default 0.95). Embeddings are normalised, so L2 = sqrt(2 - 2 cosine) and both metrics pick the same closest photo.

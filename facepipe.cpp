@@ -503,6 +503,93 @@ struct Gallery {
   }
 };
 
+// ---- strangers (D-047): a face nobody enrolled still gets a number, so a day's different faces can be counted and the
+// same visitor is not counted twice. data/strangers.tsv, one line per stranger, "id<TAB>first_ts<TAB>v1,...,v512" (the
+// gallery's own shape), appended only and never updated. Loaded and pruned at start: a vector is kept STRANGER_DAYS days
+// from the first sighting and no longer, so a regular visitor nobody identifies does not build up a profile for ever -
+// the cost is that after that they are a new number, which a day's count never sees. Matched with the active metric
+// (passes()), the gallery's own threshold, so the website's one control governs both. Worker thread only.
+static const double STRANGER_DAYS = 30;
+static std::string STRANGERS;
+struct Strangers {
+  std::vector<long long> ids;
+  std::vector<std::vector<float>> embs;
+  long long next = 1;
+
+  // Reads the file, drops what is too old, and rewrites it when anything was dropped. A line can be torn: a crash
+  // between the write and the flush leaves half of one, and a crash between the append and the in-memory insert can
+  // leave a duplicate id. Both are skipped here, and both cost at most one face in one day's count.
+  void load(double now) {
+    ids.clear(); embs.clear(); next = 1;
+    std::vector<std::string> keep;
+    bool dropped = false;
+    std::ifstream f(STRANGERS);
+    std::string line;
+    while (std::getline(f, line)) {
+      size_t t1 = line.find('\t');
+      size_t t2 = t1 == std::string::npos ? std::string::npos : line.find('\t', t1 + 1);
+      if (t2 == std::string::npos) { dropped = true; continue; }
+      const long long id = std::atoll(line.c_str());
+      const double first = std::atof(line.c_str() + t1 + 1);
+      std::vector<float> e;
+      for (const char *q = line.c_str() + t2 + 1; *q;) {  // strtof, not stof: a torn line must not throw
+        char *end = 0;
+        const float x = strtof(q, &end);
+        if (end == q) break;
+        e.push_back(x);
+        q = *end == ',' ? end + 1 : end;
+      }
+      const bool dup = std::find(ids.begin(), ids.end(), id) != ids.end();
+      if (id <= 0 || e.size() != 512 || dup || now - first >= STRANGER_DAYS * 86400) { dropped = true; continue; }
+      ids.push_back(id); embs.push_back(e); keep.push_back(line);
+      if (id >= next) next = id + 1;
+    }
+    f.close();
+    if (dropped) rewrite(keep);
+    LOGI("strangers %s: %zu kept for up to %g days, numbering continues at %lld", STRANGERS.c_str(), ids.size(),
+         STRANGER_DAYS, next);
+  }
+
+  void rewrite(const std::vector<std::string> &lines) const {  // published by rename, as the gallery is
+    const std::string tmp = STRANGERS + ".tmp";
+    FILE *o = fopen(tmp.c_str(), "w");
+    if (!o) { LOGE("cannot write %s", tmp.c_str()); return; }
+    for (size_t i = 0; i < lines.size(); i++) fprintf(o, "%s\n", lines[i].c_str());
+    fflush(o);
+    fclose(o);
+    chmod(tmp.c_str(), 0600);  // vectors of people nobody identified: readable by this user only
+    if (rename(tmp.c_str(), STRANGERS.c_str()) != 0) LOGE("cannot replace %s", STRANGERS.c_str());
+  }
+
+  // The number of the face this is, giving it a new one the first time it is seen.
+  long long id_for(const std::vector<float> &e, double now) {
+    float best = -1;
+    size_t bi = 0;
+    for (size_t i = 0; i < embs.size(); i++) {
+      float sum = 0;
+      for (int k = 0; k < 512; k++) sum += e[k] * embs[i][k];
+      if (sum > best) { best = sum; bi = i; }
+    }
+    if (!embs.empty() && passes(best)) return ids[bi];
+    const long long id = next++;
+    std::string line = std::to_string(id) + "\t" + std::to_string((long long)now) + "\t";
+    char buf[64];
+    for (int k = 0; k < 512; k++) { snprintf(buf, sizeof buf, k ? ",%.5f" : "%.5f", e[k]); line += buf; }
+    FILE *o = fopen(STRANGERS.c_str(), "a");
+    if (o) {
+      fprintf(o, "%s\n", line.c_str());  // one whole line at a time, so a crash can lose it but not split the file
+      fflush(o);
+      fclose(o);
+      chmod(STRANGERS.c_str(), 0600);
+    } else {
+      LOGE("cannot append to %s", STRANGERS.c_str());
+    }
+    ids.push_back(id); embs.push_back(e);
+    return id;
+  }
+};
+static Strangers strangers;
+
 // ---- events: data/events-YYYY-MM-DD.jsonl + data/snaps/YYYY-MM-DD/<HHMMSS>_<track>.jpg (local time) ----
 static std::string json_str(const std::string &s) {
   std::string o = "\"";
@@ -790,8 +877,9 @@ static void write_bmp(const std::string &path, const cv::Mat &rgb) {
 }
 
 struct Cam;
-static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
-                      const std::string &frame, const std::string &clip_rel, const Quality &q);
+static void log_event(const Cam &cam, guint64 track, const std::string &name, long long unknown_id, float score,
+                      float det, const cv::Mat &face_rgb, const std::string &frame, const std::string &clip_rel,
+                      const Quality &q);
 
 // ---- cameras (D-039): up to 2 network cameras in one pipeline (one mux, shared engines); USB, CSI or a file stay one.
 // data/cameras.active: one line per camera, "<uri> <width> <height> [<id> [<name>]]" (written by the website; the id is the
@@ -836,8 +924,9 @@ __attribute__((unused)) static int read_cameras(const std::string &path) {  // u
   return n;
 }
 
-static void log_event(const Cam &cam, guint64 track, const std::string &name, float score, float det, const cv::Mat &face_rgb,
-                      const std::string &frame, const std::string &clip_rel, const Quality &q) {
+static void log_event(const Cam &cam, guint64 track, const std::string &name, long long unknown_id, float score,
+                      float det, const cv::Mat &face_rgb, const std::string &frame, const std::string &clip_rel,
+                      const Quality &q) {
   auto now = std::chrono::system_clock::now();
   std::string day_s, hms_s, iso_s;
   stamp(day_s, hms_s, &iso_s);
@@ -850,10 +939,12 @@ static void log_event(const Cam &cam, guint64 track, const std::string &name, fl
   FILE *f = fopen((DATA_DIR + "/events-" + day + ".jsonl").c_str(), "a");
   if (!f) { LOGE("cannot write events in %s", DATA_DIR.c_str()); return; }
   // score is always the best cosine; metric and l2 record which rule decided and the matching L2 distance
-  fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
+  // unknown_id is which stranger an unknown visit was (0 for someone enrolled): the website counts a day's different
+  // faces as distinct names plus distinct unknown ids (D-047)
+  fprintf(f, "{\"time\":\"%s\",\"ts\":%.3f,\"track\":%llu,\"name\":%s,\"unknown_id\":%lld,\"score\":%.3f,\"metric\":\"%s\",\"l2\":%.3f,\"det\":%.3f,"
              "\"snap\":%s,\"frame\":%s,\"clip\":%s,\"camera\":%s,\"camera_name\":%s,\"q\":%s}\n",
           iso, std::chrono::duration<double>(now.time_since_epoch()).count(), (unsigned long long)track,
-          json_str(name).c_str(), score, METRIC_L2 ? "l2" : "cosine", l2_of(score), det, json_str(snap).c_str(),
+          json_str(name).c_str(), unknown_id, score, METRIC_L2 ? "l2" : "cosine", l2_of(score), det, json_str(snap).c_str(),
           json_str(frame).c_str(), json_str(clip_rel).c_str(), json_str(cam.id).c_str(), json_str(cam.name).c_str(),
           q_json(q).c_str());
   fclose(f);
@@ -898,7 +989,7 @@ static void seed_repeats() {
 // ---- per-track state, shared by the tracker probe (producer) and the worker ----
 // unclear: decided Unknown without a clear try (nothing logged, D-042); extra: its one more try for a later clear sample
 struct TrackState { int tries = 0; int last_frame = -1000000; bool pending = false, done = false, unclear = false, extra = false;
-                    std::string name; float score = 0; };
+                    std::string name; float score = 0; long long unknown_id = 0; };
 static std::mutex st_mu;
 static std::map<TKey, TrackState> tracks;  // ponytail: cleared at 100k tracks; prune by last-seen if long runs need it
 
@@ -959,6 +1050,7 @@ static void rec_worker() {
   Gallery gal;
   gal.reload_if_changed();  // before the first job: a later reload clears the tracks (names may be stale), the first must not
   seed_repeats();
+  strangers.load(std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count());
   while (true) {
     Job j;
     {
@@ -1031,6 +1123,9 @@ static void rec_worker() {
     }
     if (decided) cands.erase(j.key);
     bool rep = decided && !unclear && repeat(cam.id, m.first, pick.emb, now);
+    // Which stranger this is (D-047). On every decided unknown, repeats included, so the live label and the event line
+    // carry the same number; a repeat matches a stranger already on file, so nothing is appended for it.
+    const long long uid = decided && !unclear && m.first == "unknown" ? strangers.id_for(pick.emb, now) : 0;
     EvReq req;
     req.key = j.key;
     bool ev = decided && !unclear && !rep && !stopping && rec_ok();
@@ -1042,6 +1137,7 @@ static void rec_worker() {
         it->second.pending = false;
         if (decided) {  // label shows from now
           it->second.done = true; it->second.name = m.first; it->second.score = m.second; it->second.unclear = unclear;
+          it->second.unknown_id = uid;
         }
       }
     }
@@ -1050,7 +1146,7 @@ static void rec_worker() {
     else if (decided) {
       std::string c = clip_trigger();       // clip starts CLIP_PRE before now
       std::string fr = ev ? save_evidence(j.key.id, req) : "";  // a frame that shows the decided name
-      log_event(cam, j.key.id, m.first, pick.score, pick.box[4], pick.face, fr, c, pick.q);
+      log_event(cam, j.key.id, m.first, uid, pick.score, pick.box[4], pick.face, fr, c, pick.q);
       (known ? n_known : n_unknown)++;
     }
     std::string s;
@@ -1290,7 +1386,7 @@ static void draw_label(NvDsObjectMeta *o, const TrackState *s) {
   std::string txt = "Recognizing...";
   double r = 0.96, g = 0.62, b = 0.04;
   if (s) {
-    if (s->name == "unknown") { txt = "Unknown"; r = 0.85; g = 0.18; b = 0.15; }
+    if (s->name == "unknown") { txt = s->unknown_id ? "Unknown #" + std::to_string(s->unknown_id) : "Unknown"; r = 0.85; g = 0.18; b = 0.15; }
     else {
       char sc[16];
       snprintf(sc, sizeof sc, "  %.2f", s->score);
@@ -2134,6 +2230,41 @@ static int selftest() {
   int off = count(20, 1000, 0);     // idle mode off
   assert(off == 20);
   IDLE_AFTER = ia; IDLE_STEP = is;
+  // strangers (D-047): the same face keeps its number, a different face gets a new one, both survive a restart, and a
+  // vector past its retention is dropped at load. No camera, GPU or models needed.
+  char sdir[] = "/tmp/facepipe-strangers-XXXXXX";
+  assert(mkdtemp(sdir));
+  STRANGERS = std::string(sdir) + "/strangers.tsv";
+  const bool was_l2 = METRIC_L2;
+  const float was_match = MATCH;
+  METRIC_L2 = false; MATCH = 0.5f;
+  std::vector<float> fa(512, 0.f), fb(512, 0.f), fa2(512, 0.f);
+  fa[0] = 1.f;                      // one face
+  fb[1] = 1.f;                      // another, cosine 0 to the first
+  fa2[0] = 0.99f; fa2[1] = 0.141f;  // the first face again from a different angle, cosine 0.99, still unit length
+  const double sn = 1763000000.0;   // a fixed clock, so the retention check cannot drift
+  strangers.load(sn);
+  const long long sid_a = strangers.id_for(fa, sn);
+  const long long sid_again = strangers.id_for(fa2, sn);  // the same face from another angle: no new number, no append
+  assert(sid_a == 1 && sid_again == sid_a);
+  const long long sid_b = strangers.id_for(fb, sn);
+  assert(sid_b == 2 && strangers.ids.size() == 2);
+  strangers.load(sn);  // a restart reads both back from the file
+  const long long sid_a_back = strangers.id_for(fa2, sn), sid_b_back = strangers.id_for(fb, sn);
+  assert(strangers.ids.size() == 2 && sid_a_back == sid_a && sid_b_back == sid_b);
+  // A month on, both are past STRANGER_DAYS: dropped, the file rewritten, and numbering starts again - a number names a
+  // face within its retention window, not for ever (D-047).
+  strangers.load(sn + (STRANGER_DAYS + 1) * 86400);
+  assert(strangers.ids.empty() && strangers.next == 1);
+  std::ifstream pruned(STRANGERS);
+  std::string left;
+  const bool anything_left = (bool)std::getline(pruned, left);
+  assert(!anything_left);
+  pruned.close();
+  METRIC_L2 = was_l2; MATCH = was_match;
+  unlink(STRANGERS.c_str());
+  rmdir(sdir);
+  STRANGERS.clear();
   printf("selftest ok\n");
   return 0;
 }
@@ -2145,6 +2276,7 @@ int main(int argc, char **argv) {
   REC_ENGINE = app_dir + "/models/r50_b16.plan";
   DET_ENGINE = app_dir + "/models/scrfd_384x640_b1.plan";
   GALLERY = env("FACEPIPE_GALLERY", DATA_DIR + "/gallery.tsv");
+  STRANGERS = env("FACEPIPE_STRANGERS", DATA_DIR + "/strangers.tsv");
   REC_DIR = env("FACEPIPE_REC", "/mnt/rec");
   MATCH = std::stof(env("FACEPIPE_MATCH", "0.5"));
   L2_MATCH = std::stof(env("FACEPIPE_L2_MATCH", "0.95"));

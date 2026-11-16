@@ -190,6 +190,17 @@ def attendance(events):
     return people, unknown
 
 
+def face_counts(people, unknown):
+    """(different faces, different strangers) for one day, from what attendance() already grouped (D-047).
+
+    One identity per face: an enrolled name, or the number facepipe gave an unknown visit, which it keeps for 30 days.
+    So one person seen at both cameras counts once, and a stranger seen again, today or last week, counts once. Event
+    lines written before stranger numbers existed carry none: they cannot be told apart any more, so they count as one
+    face between them. These are faces the pipeline decided and logged, not every face it saw."""
+    strangers = len(set(e.get("unknown_id") or 0 for e in unknown))
+    return len(people) + strangers, strangers
+
+
 def match_text(e):
     """the number of the rule that decided, always named: "L2 0.62" (distance, 0 to 2, lower is closer) or "Cosine 0.78"
     (similarity, -1 to 1, higher is closer); events before the metric field are cosine"""
@@ -346,12 +357,15 @@ def summary_cards(people, unknown, gal, st):
     present = len([n for n in people if n in gal])
     rate = "%d%% of %d enrolled" % (round(100.0 * present / len(gal)), len(gal)) if gal else "no one enrolled"
     last = max([p["last"] for p in people.values()] + [e["time"] for e in unknown], default="")
+    faces, strangers = face_counts(people, unknown)
     return """<div class="cards">
  <div class="card"><div class="k">Present</div><div class="v">%d</div><div class="s">%s</div></div>
  <div class="card"><div class="k">Absent</div><div class="v">%d</div><div class="s">of the enrolled list</div></div>
- <div class="card"><div class="k">Unknown faces</div><div class="v">%d</div><div class="s">not matched to anyone</div></div>
+ <div class="card"><div class="k">Different faces</div><div class="v">%d</div><div class="s">names and strangers, each counted once</div></div>
+ <div class="card"><div class="k">Unknown faces</div><div class="v">%d</div><div class="s">%d visit%s, nobody enrolled</div></div>
  <div class="card"><div class="k">Last activity</div><div class="v">%s</div><div class="s">%s</div></div>
-</div>""" % (len(people), rate, len([n for n in gal if n not in people]), len(unknown), hm(last) or "&ndash;",
+</div>""" % (len(people), rate, len([n for n in gal if n not in people]), faces, strangers, len(unknown),
+             "" if len(unknown) == 1 else "s", hm(last) or "&ndash;",
              "last face seen" if last else "nothing seen yet")
 
 
@@ -437,7 +451,7 @@ def page_attendance(day, today):
 <section aria-labelledby="h-present"><div class="sh"><h2 id="h-present">Present</h2><span class="count">%d</span>
  <span class="end"><label class="sr" for="q">Search names</label><input id="q" type="search" placeholder="Search names" autocomplete="off"></span></div>%s</section>
 <section aria-labelledby="h-absent"><div class="sh"><h2 id="h-absent">Absent</h2><span class="count">%d</span></div>%s</section>
-<section aria-labelledby="h-unknown" class="noprint"><div class="sh"><h2 id="h-unknown">Unknown faces</h2><span class="count">%d</span></div>%s</section>""" % (
+<section aria-labelledby="h-unknown" class="noprint"><div class="sh"><h2 id="h-unknown">Unknown visits</h2><span class="count">%d</span></div>%s</section>""" % (
         d.strftime("%A, %d %B %Y"), prev_d, day, today, next_d, dis if day >= today else "", dis if is_today else "", day,
         summary_cards(people, unknown, gal, st), len(people), present, len(absent), absent_html, len(unknown), unknown_html)
     return layout("attendance", "Attendance", body, refresh=is_today)
@@ -2662,6 +2676,15 @@ def selftest_checks():
           {"time": "2026-11-06T09:05:00", "ts": 2, "name": "unknown", "score": 0.2, "snap": "s2"},
           {"time": "2026-11-06T17:00:00", "ts": 3, "name": "a_b", "score": 0.7, "snap": "s3"}]
     people, unknown = attendance(ev)
+    # different faces (D-047): one name plus one stranger number is two faces, however many visits they made; an event
+    # line from before stranger numbers has none, and those cannot be told apart, so they count as one face between them
+    assert face_counts(*attendance(ev + [{"time": "2026-11-06T09:06:00", "ts": 4, "name": "unknown", "score": 0.2,
+                                          "snap": "s4", "unknown_id": 7}])) == (3, 2)
+    assert face_counts(*attendance(ev + [{"time": "2026-11-06T09:06:00", "ts": 4, "name": "unknown", "score": 0.2,
+                                          "snap": "s4", "unknown_id": 7},
+                                         {"time": "2026-11-06T09:40:00", "ts": 5, "name": "unknown", "score": 0.2,
+                                          "snap": "s5", "unknown_id": 7}])) == (3, 2)  # the same stranger again
+    assert face_counts({}, []) == (0, 0)
     p = people["a_b"]
     assert p["first"].endswith("09:00:00") and p["last"].endswith("17:00:00"), p
     assert hms("2026-11-06T17:05:09") == "05:05:09 PM" and hm("2026-11-06T00:30:00") == "12:30 AM"
