@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-16
+
+### Added
+
+- Face snapshots are now deleted after 30 days instead of being kept for ever. Attendance records are untouched: a day older than that still shows who was seen and when, with a placeholder where the face picture used to be. The period is set per device with `FACEPIPE_SNAP_DAYS` (0 keeps them for ever), and matches how long an unidentified face's vector is already kept (D-049).
+
 ## [1.14.1] - 2026-11-16
 
 ### Fixed

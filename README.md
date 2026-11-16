@@ -44,7 +44,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 - **No infrastructure.** One credit-card-sized board replaces a recognition server, a video server and a database for a single entrance.
 - **Privacy by design.** Biometric data stays on the device, behind logins, with a documented threat model and data inventory.
 - **Built to run unattended.** systemd supervision, a frame watchdog, clean shutdown, storage rotation, daily logs and self-updating releases with rollback.
-- **Evidence for every decision.** Each attendance event comes with a face snapshot, a full-frame image with the name drawn, and a short video clip.
+- **Evidence for every decision.** Each attendance event comes with a face snapshot, a full-frame image with the name drawn, and a short video clip. Snapshots are deleted after 30 days (`FACEPIPE_SNAP_DAYS`, D-049); the attendance records stay.
 
 ## Capabilities
 

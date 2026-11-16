@@ -635,3 +635,47 @@ in gets a successful install and a banner rather than a failed install. The bann
 are the only warning; nothing pages anyone.
 Revisit if: a network camera should be waited for in the same way. It is not: an RTSP source may answer at any moment,
 `nvurisrcbin` retries it on its own, and the watchdog's restart is the right answer for a stream that never arrives.
+
+## D-049: A face snapshot is kept 30 days, the attendance row for ever
+
+The system wrote a 112x112 face crop for every event and never deleted one. `docs/THREAT.md` has named that the larger
+of its two biometric gaps since v1.14.0, next to the stranger vectors that are already pruned at 30 days (D-047). A
+client site's staff are in those images; under the DPDP Act 2023 keeping them for ever is the part hardest to defend.
+No council: the owner's fixed Codex session still rejects its configured model (`The 'gpt-6.1-sol' model is not
+supported when using Codex with a ChatGPT account`), as for D-047 and D-048, so this decision is unreviewed by a second
+model. **The retention period itself is the owner's call** (exposure and retention are ownership calls): 30 days is
+what shipped, `FACEPIPE_SNAP_DAYS` changes it with no new release.
+
+Options:
+
+1. Keep every snapshot for ever (what shipped until now)
+2. Delete a day's snapshots once they are older than a window; keep the attendance rows (chosen)
+3. Delete the whole day - rows, snapshots, frames and clips - past the window
+4. Delete by disk usage, as the recordings volume already does (`rotate_storage()`, 90% full, oldest week)
+
+Chosen 2, with the window at 30 days to match the stranger vectors beside it: one number governs how long this device
+remembers a face it was shown, whether as an embedding or as a picture. Option 1 is the gap. Option 3 destroys the
+attendance record, which is the business record the site is keeping and which holds no image - who was present on a day
+six months ago is exactly what an attendance system is for. Option 4 is the wrong trigger for personal data: it keeps
+faces as long as the disk is roomy, which is a storage rule pretending to be a retention rule. Both can coexist -
+`rotate_storage()` still frees the recordings volume when it fills, and now the snapshots on the microSD age out on
+time.
+
+What it does: `prune_snaps(today)` deletes whole `data/snaps/YYYY-MM-DD/` folders older than `FACEPIPE_SNAP_DAYS`
+(default 30, 0 = for ever), reusing `rm_day()`. It runs at start and then once a day, when the first event of a new day
+is written - the worker thread, so no lock is needed. The event rows keep naming their snapshots, so the website answers
+a small inline SVG placeholder for a picture that is gone rather than a broken image; a pruned day still shows who was
+seen, when, and at what score.
+
+Known hole: a board that records nothing for weeks keeps its old snapshots until its next event or its next restart,
+because nothing else wakes up to prune. A timer thread would close it; one more thread touching the data directory for a
+case that only happens when the camera is away is not worth it, and the start-up prune covers every restart (a release
+restarts the service within 10 minutes of publication, D-031).
+
+Proven: `prune_snaps` in `facepipe --selftest` (a day past the window deleted, a day inside it and today kept, 0 keeps a
+2020 folder), `web.py --selftest` (a missing snapshot answers 200 `image/svg+xml` with the placeholder, and still 401
+before sign-in), compile and cppcheck in `ubuntu:18.04`.
+Trade-off: the pictures that back a decision are gone after a month, so a dispute older than that has the row, the
+score and the name but no image. That is the point of a retention rule, and the owner can raise the window per device.
+Revisit if: the owner wants the attendance rows to age out too (that is a second rule, over `events-*.jsonl`, and it
+changes what the site keeps as its record), or a client's contract names a different period.
