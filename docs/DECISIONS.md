@@ -617,8 +617,19 @@ website names the reason in the state it already had for a running service with 
 Nothing is recorded while it waits, which is the truth of the situation and is what the banner says. A camera plugged
 in later is picked up within 5 s, with no restart needed.
 
-Proven: `make check` and cppcheck in `ubuntu:18.04`, `web.py --selftest` on Python 3.6, and on the device by the
-deploy of this release itself, which is what the old health check refused to let happen.
+Proven: `make check` and cppcheck in `ubuntu:18.04`, `web.py --selftest` on Python 3.6, and on the device - v1.14.1
+deployed at 02:19 PM IST on 2026-11-16 (`healthy: facepipe 1.14.1 (pid 15358) at 180 frames after 24s`), where v1.14.0
+had rolled itself back an hour earlier. The camera came back before that deploy, so the waiting path was proven on the
+board by a throwaway run instead, in its own data directory, with a device path that does not exist:
+
+```
+[WARNING] the USB camera is not connected: waiting for it, checking every 5 s. Nothing is recorded meanwhile.
+{"version":"1.14.1","updated":1794819000,"waiting":"the USB camera is not connected","fps":0.0,"det_fps":0.0,
+ "frames":0,"known":0,"unknown":0,"step":2,"cameras":[]}
+```
+
+It waited for the full run instead of exiting, and `status.json` stayed fresh with the reason - the two things the old
+code could not do.
 Trade-off: a board left without a camera now looks healthy to a deploy, so an operator who forgot to plug the camera
 in gets a successful install and a banner rather than a failed install. The banner and the "no camera picture" state
 are the only warning; nothing pages anyone.
