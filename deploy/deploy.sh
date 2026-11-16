@@ -5,7 +5,8 @@
 #   1. clean build of the tag from the public repository   2. self-tests and version check
 #   3. release assets in $DIST (tarball + SHA256SUMS)       4. install over app_dir, keeping config, data and models
 #   5. restart services; healthy = both active, and the current facepipe process (systemd MainPID, unchanged) wrote two
-#      status reports with the new version and advancing frames; else roll back. Needs the camera online.
+#      status reports with the new version and advancing frames; else roll back. A board with no camera attached is
+#      healthy too, when facepipe reports that it is waiting for one (D-048).
 set -eu
 TAG=$1
 APP=$(cd "$2" && pwd)
@@ -90,6 +91,11 @@ while [ $i -lt $WINDOW ]; do
   grep -q "\"version\":\"$VER\"" "$APP/data/status.json" 2>/dev/null || continue
   u=$(field updated); f=$(field frames)
   [ -n "$u" ] && [ -n "$f" ] && [ "$u" -ge "$seen" ] || continue
+  # No camera attached (D-048): this process is up, reporting, and says why there are no frames. Without this a board
+  # whose camera is elsewhere can never be updated, because the check below waits for frames that cannot come.
+  if grep -q '"waiting":' "$APP/data/status.json" 2>/dev/null; then
+    echo "healthy: facepipe $VER (pid $pid) running, waiting for the camera"; echo "$DIST"; exit 0
+  fi
   if [ -n "$last_u" ] && [ "$u" -gt "$last_u" ] && [ "$f" -gt "$last_f" ]; then
     echo "healthy: facepipe $VER (pid $pid) at $f frames after ${i}s"; echo "$DIST"; exit 0
   fi

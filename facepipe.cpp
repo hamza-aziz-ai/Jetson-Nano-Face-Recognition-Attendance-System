@@ -1908,6 +1908,65 @@ static std::string camera_desc(const std::string &uri, int w, int h) {
          " ! jpegparse ! nvv4l2decoder mjpeg=1";
 }
 
+// ---- a camera wired to this board that is not connected (D-048) ----
+// Without this the process died a few seconds into every start, systemd restarted it (337 times in an hour on
+// 2026-11-16, with the USB camera elsewhere), the website had nothing to show, and - the part that hurt - a deploy
+// could never pass its health check, because that waits for advancing frames, so no release could be installed at all
+// while the camera was away. Now the process waits for the camera before it builds the pipeline, and keeps writing
+// status.json with the reason, so the website and deploy.sh can tell waiting from dead. Nothing is recorded meanwhile.
+static const int CAM_WAIT_S = 5;
+
+// How many CSI capture nodes this board has ("vi-output, imx219 ..." in /sys/class/video4linux/videoN/name), which is
+// Argus's sensor-id order. A missing CSI sensor is only reported by nvarguscamerasrc as "No cameras available" on
+// stderr, never on the GStreamer bus, so it has to be checked here.
+static int csi_sensors() {
+  int found = 0;
+  if (DIR *d = opendir("/sys/class/video4linux")) {
+    while (struct dirent *e = readdir(d)) {
+      if (strncmp(e->d_name, "video", 5)) continue;
+      std::ifstream f(std::string("/sys/class/video4linux/") + e->d_name + "/name");
+      std::string name;
+      std::getline(f, name);
+      if (name.compare(0, 9, "vi-output") == 0) found++;
+    }
+    closedir(d);
+  }
+  return found;
+}
+
+static bool camera_attached(const std::string &uri) {
+  if (uri.rfind("usb:", 0) == 0) return access(uri.substr(4).c_str(), F_OK) == 0;
+  if (uri.rfind("csi:", 0) == 0) return atoi(uri.c_str() + 4) < csi_sensors();
+  return true;  // a network or file source is not a device: nothing to wait for here
+}
+
+// status.json while there is no camera, in the shape the website and deploy.sh already read, plus "waiting" with the
+// reason. fps 0 puts the website in its own "no camera picture" state (status(), web.py).
+static void write_waiting_status(const char *why) {
+  const std::string tmp = DATA_DIR + "/status.json.tmp";
+  if (FILE *s = fopen(tmp.c_str(), "w")) {
+    fprintf(s, "{\"version\":\"%s\",\"updated\":%ld,\"waiting\":%s,\"fps\":0.0,\"det_fps\":0.0,\"frames\":0,"
+               "\"known\":0,\"unknown\":0,\"step\":%u,\"cameras\":[]}\n",
+            FACEPIPE_VERSION, (long)time(nullptr), json_str(why).c_str(), frame_step());
+    fclose(s);
+    rename(tmp.c_str(), (DATA_DIR + "/status.json").c_str());
+  }
+}
+
+// Returns false when a signal arrived while waiting, so main can exit the normal way.
+static bool wait_for_camera(const std::string &uri) {
+  if (camera_attached(uri)) return true;
+  const char *why = uri.rfind("csi:", 0) == 0 ? "the CSI camera is not connected" : "the USB camera is not connected";
+  LOGW("%s: waiting for it, checking every %d s. Nothing is recorded meanwhile.", why, CAM_WAIT_S);
+  while (!camera_attached(uri)) {
+    if (stopping) return false;
+    write_waiting_status(why);
+    sleep(CAM_WAIT_S);
+  }
+  LOGI("the camera is connected: starting");
+  return true;
+}
+
 // index of the camera source (nvurisrcbin "cam<i>") that m comes from, or -1
 static int msg_cam(GstMessage *m) {
   for (GstObject *o = GST_MESSAGE_SRC(m); o; o = GST_OBJECT_PARENT(o)) {
@@ -2354,6 +2413,7 @@ int main(int argc, char **argv) {
   bool live = camera || uri.rfind("rtsp://", 0) == 0;
   LOGI("version %s, processing every %u frame(s), match %s %s %.2f, data %s", FACEPIPE_VERSION,
           frame_step(), METRIC_L2 ? "L2" : "cosine", METRIC_L2 ? "<=" : ">=", METRIC_L2 ? L2_MATCH : MATCH, DATA_DIR.c_str());
+  if (camera && !wait_for_camera(uri)) return 0;  // D-048: a camera wired to this board that is not connected yet
   start_watchdog();
   gst_init(&argc, &argv);
   if (!det_setup()) { LOGE("detector setup failed (engine %s or the 640x384 surface)", DET_ENGINE.c_str()); return 1; }

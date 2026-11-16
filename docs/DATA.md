@@ -23,7 +23,7 @@ All data lives on the device. None of it is in the repository.
 | Event clips | `/mnt/rec/YYYY-MM-DD/HHMMSS_clip.mp4` | H.264 MP4, about 8 s | Whole scene | Until rotation (oldest week deleted at 90% full) |
 | Uploaded videos | `data/uploads/<id>/input`, `result.mp4`, `result.json`, `meta.json` | Video, H.264 MP4, JSON | Faces and scenes the owner uploaded; names found in them | 7 days after upload (owner); unfinished uploads 1 hour |
 | Live frame | `/dev/shm/facepipe/live.jpg` | JPEG | Current camera view | RAM, overwritten |
-| Status | `data/status.json` | JSON | fps and counters | Overwritten every 5 s |
+| Status | `data/status.json` | JSON | fps and counters, or `waiting` with the reason while a camera wired to the board is not connected (from v1.14.1, D-048) | Overwritten every 5 s |
 | Logins | `web_auth` (PBKDF2 hash), `rtsp_auth` (plain, 0600) | Text | Credentials | Until changed |
 
 ## Removing a person

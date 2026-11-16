@@ -238,7 +238,9 @@ def status():
     if age > STALE_S:
         s.update(state="stopped", detail="No report from the recognition service for %d s" % age)
     elif s.get("fps", 0) < 0.5:
-        s.update(state="no_video", detail="Service running, waiting for the camera")
+        # facepipe says why when it knows: the camera wired to this board is not connected (D-048)
+        s.update(state="no_video", detail="Service running, %s" % s["waiting"] if s.get("waiting")
+                 else "Service running, waiting for the camera")
     else:
         cams = s.get("cameras") or []
         if len(cams) > 1:  # two cameras: each one's own rate, or that it is offline
@@ -819,7 +821,10 @@ def service_view():
     if st["state"] == "stopped":
         return "stopped", "Recognition is NOT RUNNING", "It should be running: it may be starting or restarting; if this stays for a minute, see the System page."
     if st["state"] == "no_video":
-        return "no_video", "Recognition is RUNNING but has NO CAMERA PICTURE", "No attendance is recorded until the camera answers."
+        why = st.get("waiting")  # D-048: facepipe waits for a camera that is not connected instead of restarting
+        return ("no_video", "Recognition is RUNNING but has NO CAMERA PICTURE",
+                ("%s%s. No attendance is recorded until it is back." % (why[0].upper(), why[1:])) if why
+                else "No attendance is recorded until the camera answers.")
     return "live", "Recognition is RUNNING", st["detail"] + (". " + last + "." if last else ".")
 
 
