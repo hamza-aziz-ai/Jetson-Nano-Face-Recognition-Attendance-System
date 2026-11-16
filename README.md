@@ -59,6 +59,7 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 🎞️ **Video upload** | Recognition on a recorded video (H.264/H.265, up to 1080p and 30 min): annotated copy to download with the names found; live cameras always go first; never counted as attendance; deleted after 7 days |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR on the local network (refused from the internet, D-041) |
+| 🎥 **No camera** | A camera wired to the board that is not connected is waited for, with the reason on every page, instead of the service restarting every few seconds; a release still installs on such a board (D-048) |
 | 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload, Users and System pages; present, absent, different faces and unknown visits per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 👥 **Users** | Admins and viewers added by email or phone number; viewers see everything and change nothing (e.g. family); single-use set-password links, no email or SMS needed |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |

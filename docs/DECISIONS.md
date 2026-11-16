@@ -586,3 +586,41 @@ and an old number can come back for a different person. Day counts never see it;
 Revisit if: the owner wants faces *detected* rather than visits *logged* (that is option 4, and it needs a validated
 cut-off first), or wants the count available as JSON for another system to collect, as the Orin serves it at
 `/api/unique`.
+
+## D-048: With no camera attached, wait and say so, instead of restarting for ever
+
+Found 2026-11-16 when v1.14.0 would not deploy: the USB camera is elsewhere, so `facepipe` died six seconds into every
+start and systemd restarted it 337 times in an hour, and `deploy/deploy.sh` - which calls a deploy healthy only after
+two status reports with advancing frames - rolled every release back. The write-up is
+`docs/bugs/no-camera-restart-loop.md`. No council: the owner's fixed Codex session rejects its configured model (see
+D-047), and this is a correctness fix rather than a trade-off.
+
+Options:
+
+1. Leave it: plug the camera in when a release has to go on
+2. Check the device before building the pipeline, wait for it, report `waiting`, and accept that as healthy (chosen)
+3. Slow the restarts down with systemd (`RestartSec`, `StartLimitBurst`)
+4. Let the website start recognition once a camera is chosen, and exit when there is none
+
+Chosen 2. Option 1 makes the hardware a precondition for software updates, which is how a camera-less board becomes a
+board nobody can fix remotely. Option 3 treats the symptom: the deploy would still roll back, because the health check
+would still be waiting for frames. Option 4 moves the loop into the website and needs it to poll for devices, and a
+board whose camera is unplugged at boot would never start recognition again by itself.
+
+What it does: a `usb:` device path is checked with `access()`, a `csi:` sensor against the board's `vi-output` capture
+nodes (`csi_sensors()`; `nvarguscamerasrc` reports a missing sensor as `No cameras available` on stderr and never on
+the bus, so nothing else can see it). While the camera is absent the process waits, rechecks every 5 s and writes
+`status.json` with `"waiting"` and the reason - **before** `start_watchdog()`, because the watchdog exits when frames
+stop advancing, which is what waiting looks like from the outside. `deploy.sh` treats that report as healthy, and the
+website names the reason in the state it already had for a running service with no picture.
+
+Nothing is recorded while it waits, which is the truth of the situation and is what the banner says. A camera plugged
+in later is picked up within 5 s, with no restart needed.
+
+Proven: `make check` and cppcheck in `ubuntu:18.04`, `web.py --selftest` on Python 3.6, and on the device by the
+deploy of this release itself, which is what the old health check refused to let happen.
+Trade-off: a board left without a camera now looks healthy to a deploy, so an operator who forgot to plug the camera
+in gets a successful install and a banner rather than a failed install. The banner and the "no camera picture" state
+are the only warning; nothing pages anyone.
+Revisit if: a network camera should be waited for in the same way. It is not: an RTSP source may answer at any moment,
+`nvurisrcbin` retries it on its own, and the watchdog's restart is the right answer for a stream that never arrives.

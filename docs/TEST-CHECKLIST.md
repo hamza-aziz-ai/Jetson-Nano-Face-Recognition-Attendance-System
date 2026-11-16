@@ -2,6 +2,12 @@
 
 A change is done when CI is green and the relevant device checks pass, with the real output recorded here or in the commit.
 
+## No camera connected (D-048)
+
+- Unplug the USB camera and restart `facepipe`: the log must show `the USB camera is not connected: waiting for it, checking every 5 s`, the restart counter must stop rising (`systemctl show facepipe -p NRestarts`), `data/status.json` must stay fresher than 20 s with `"waiting"` in it, and every page must carry "Recognition is RUNNING but has NO CAMERA PICTURE" naming that camera.
+- Plug it back in: recording must resume within about 5 s with no restart and no action on the website.
+- A release must install on that board: `sudo systemctl start facepipe-update` (or the timer) must end in `healthy: facepipe <version> (pid N) running, waiting for the camera`, not in a rollback.
+
 ## Unknown faces keep their number (D-047)
 
 - `./facepipe --selftest` and `python3 web.py --selftest` cover the rule itself: the same face from another angle keeps its number, a different face gets a new one, both survive a restart, both are dropped after 30 days, and the day's count treats one stranger's repeat visits as one face.

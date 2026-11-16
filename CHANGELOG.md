@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-11-16
+
+### Fixed
+
+- With no camera connected - the USB camera unplugged, or a CSI camera whose ribbon is out - recognition used to die a few seconds into every start and be restarted by the system for ever, hundreds of times an hour, with nothing on the website to explain it. It now waits for the camera, checks every five seconds, says on every page which camera it is waiting for, and starts recording by itself when the camera is back. Nothing is recorded while it waits, as before.
+- A release could not be installed at all on a board whose camera was elsewhere: the deploy waits for the camera to deliver frames before it calls an install healthy, and rolled every release back when they never came. A board that reports it is waiting for its camera now counts as healthy, so updates go on as usual (D-048, `docs/bugs/no-camera-restart-loop.md`).
+
 ## [1.14.0] - 2026-11-16
 
 ### Added
