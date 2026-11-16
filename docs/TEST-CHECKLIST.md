@@ -2,6 +2,12 @@
 
 A change is done when CI is green and the relevant device checks pass, with the real output recorded here or in the commit.
 
+## Snapshots age out (D-049)
+
+- `./facepipe --selftest` covers the pruning itself. On the device, with `data/snaps/` holding a folder older than `FACEPIPE_SNAP_DAYS`: restart `facepipe` and that folder must be gone, with `snapshots kept 30 days: deleted YYYY-MM-DD` in the log, while today's folder and a folder inside the window stay.
+- Open an attendance day whose snapshots were deleted: the page must still list the people and times, with the grey placeholder where each face was, and no broken image.
+- `FACEPIPE_SNAP_DAYS=0` in `facepipe.env` must keep every folder.
+
 ## No camera connected (D-048)
 
 - Unplug the USB camera and restart `facepipe`: the log must show `the USB camera is not connected: waiting for it, checking every 5 s`, the restart counter must stop rising (`systemctl show facepipe -p NRestarts`), `data/status.json` must stay fresher than 20 s with `"waiting"` in it, and every page must carry "Recognition is RUNNING but has NO CAMERA PICTURE" naming that camera.

@@ -25,6 +25,7 @@
 //      FACEPIPE_DROP=N (process every Nth decoded frame, default 2; 1 = all frames), FACEPIPE_REC (default /mnt/rec),
 //      FACEPIPE_RTSP_AUTH (default $FACEPIPE_DIR/rtsp_auth), FACEPIPE_RTSP_PORT (default 8554),
 //      FACEPIPE_WATCHDOG (seconds without frames before exiting, default 60, 0 = off),
+//      FACEPIPE_SNAP_DAYS (days a face snapshot is kept, default 30, 0 = for ever, D-049),
 //      FACEPIPE_LOGS (log folder, default $FACEPIPE_DIR/logs), FACEPIPE_IDLE_AFTER (seconds without a face before
 //      detecting less often, default 10, 0 = always every frame), FACEPIPE_IDLE_STEP (detect every Nth frame while
 //      idle, default 6).
@@ -727,6 +728,31 @@ static void rotate_storage() {
     if (d < cut && d != today) { rm_day(REC_DIR + "/" + d); LOGW("storage full: deleted %s", d.c_str()); }
 }
 
+// A face snapshot is biometric data of a real person, so it is not kept for ever (D-049): a day folder older than
+// SNAP_DAYS goes, with the stranger vectors beside it on the same 30-day window. The attendance rows stay - a pruned
+// day still shows who was seen and when, only the picture is gone, and the website answers a placeholder for it.
+static int SNAP_DAYS = 30;  // FACEPIPE_SNAP_DAYS; 0 keeps them for ever
+static void prune_snaps(const std::string &today) {
+  if (SNAP_DAYS <= 0) return;
+  struct tm t = {};
+  if (sscanf(today.c_str(), "%4d-%2d-%2d", &t.tm_year, &t.tm_mon, &t.tm_mday) != 3) return;
+  t.tm_year -= 1900; t.tm_mon -= 1; t.tm_mday -= SNAP_DAYS; t.tm_hour = 12;  // midday: no DST edge, and IST has none
+  mktime(&t);
+  char cut[16];
+  strftime(cut, sizeof cut, "%Y-%m-%d", &t);
+  const std::string root = DATA_DIR + "/snaps";
+  if (DIR *d = opendir(root.c_str())) {
+    while (dirent *e = readdir(d)) {
+      int y, mo, da;
+      if (strlen(e->d_name) == 10 && sscanf(e->d_name, "%4d-%2d-%2d", &y, &mo, &da) == 3 && strcmp(e->d_name, cut) < 0) {
+        rm_day(root + "/" + e->d_name);
+        LOGI("snapshots kept %d days: deleted %s", SNAP_DAYS, e->d_name);
+      }
+    }
+    closedir(d);
+  }
+}
+
 static void clip_push(GstBuffer *b, GstClockTime pts) {  // v_mu held
   GstBuffer *c = gst_buffer_copy(b);  // shares the memory, own timestamps
   GST_BUFFER_PTS(c) = GST_BUFFER_DTS(c) = pts - clip.base;
@@ -931,6 +957,8 @@ static void log_event(const Cam &cam, guint64 track, const std::string &name, lo
   std::string day_s, hms_s, iso_s;
   stamp(day_s, hms_s, &iso_s);
   const char *day = day_s.c_str(), *hms = hms_s.c_str(), *iso = iso_s.c_str();
+  static std::string snap_day;  // worker thread only: prune once, when the first event of a new day is written
+  if (snap_day != day_s) { snap_day = day_s; prune_snaps(day_s); }
   std::string snapdir = DATA_DIR + "/snaps/" + day;
   mkdir((DATA_DIR + "/snaps").c_str(), 0755);
   mkdir(snapdir.c_str(), 0755);
@@ -2324,6 +2352,42 @@ static int selftest() {
   unlink(STRANGERS.c_str());
   rmdir(sdir);
   STRANGERS.clear();
+  // snapshot retention (D-049): a day folder past SNAP_DAYS is deleted, a day inside the window and today are kept,
+  // and 0 keeps every day. No camera, GPU or models needed.
+  char pdir[] = "/tmp/facepipe-snaps-XXXXXX";
+  assert(mkdtemp(pdir));
+  const std::string was_data = DATA_DIR;
+  DATA_DIR = pdir;
+  const int was_snap_days = SNAP_DAYS;
+  SNAP_DAYS = 30;
+  mkdir((DATA_DIR + "/snaps").c_str(), 0755);
+  auto day_with = [](const std::string &day) {  // one day folder holding one snapshot
+    const std::string dir = DATA_DIR + "/snaps/" + day;
+    mkdir(dir.c_str(), 0755);
+    FILE *b = fopen((dir + "/120000_1.bmp").c_str(), "w");
+    if (b) { fputs("x", b); fclose(b); }
+    return dir;
+  };
+  const std::string old_day = day_with("2026-09-01");   // 76 days before the date below
+  const std::string edge_day = day_with("2026-10-19");  // 28 days before it: inside the window
+  const std::string today_day = day_with("2026-11-16");
+  prune_snaps("2026-11-16");
+  const bool old_gone = access(old_day.c_str(), F_OK) != 0;
+  const bool edge_kept = access(edge_day.c_str(), F_OK) == 0;
+  const bool today_kept = access(today_day.c_str(), F_OK) == 0;
+  assert(old_gone && edge_kept && today_kept);
+  SNAP_DAYS = 0;  // off: even a very old day stays
+  const std::string ancient = day_with("2020-01-01");
+  prune_snaps("2026-11-16");
+  const bool ancient_kept = access(ancient.c_str(), F_OK) == 0;
+  assert(ancient_kept);
+  rm_day(ancient);
+  rm_day(edge_day);
+  rm_day(today_day);
+  rmdir((DATA_DIR + "/snaps").c_str());
+  rmdir(pdir);
+  DATA_DIR = was_data;
+  SNAP_DAYS = was_snap_days;
   printf("selftest ok\n");
   return 0;
 }
@@ -2337,6 +2401,7 @@ int main(int argc, char **argv) {
   GALLERY = env("FACEPIPE_GALLERY", DATA_DIR + "/gallery.tsv");
   STRANGERS = env("FACEPIPE_STRANGERS", DATA_DIR + "/strangers.tsv");
   REC_DIR = env("FACEPIPE_REC", "/mnt/rec");
+  SNAP_DAYS = std::atoi(env("FACEPIPE_SNAP_DAYS", "30").c_str());
   MATCH = std::stof(env("FACEPIPE_MATCH", "0.5"));
   L2_MATCH = std::stof(env("FACEPIPE_L2_MATCH", "0.95"));
   std::string metric = env("FACEPIPE_METRIC", "cosine");
@@ -2345,6 +2410,7 @@ int main(int argc, char **argv) {
   METRIC_L2 = metric == "l2";
   if (argc == 2 && !strcmp(argv[1], "--selftest")) return selftest();
   mkdir(DATA_DIR.c_str(), 0755);
+  { std::string today, hms; stamp(today, hms); prune_snaps(today); }  // D-049, then once a day from log_event
   {  // face matching chosen on the website (System page): metric=cosine|l2, cosine=<min similarity>, l2=<max distance>
     std::ifstream mf(env("FACEPIPE_MATCHING", DATA_DIR + "/matching.conf"));
     std::string line;

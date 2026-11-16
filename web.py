@@ -33,6 +33,9 @@ except OSError:
     VERSION = "dev"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SNAP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/\d{6}_\d+\.(jpg|bmp)$")
+# Shown in place of a face snapshot whose retention has passed (D-049): the attendance row outlives its picture, so
+# the page needs something to put there rather than a broken image.
+SNAP_GONE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" role="img" aria-label="snapshot deleted"><rect width="112" height="112" fill="#d8d8d8"/><circle cx="56" cy="44" r="18" fill="#b4b4b4"/><path d="M20 112a36 36 0 0 1 72 0z" fill="#b4b4b4"/></svg>')
 REC_DIR = os.environ.get("FACEPIPE_REC", "/mnt/rec")
 REC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/\d{6}_(\d+\.jpg|clip\.mp4)$")
 LIVE_DIR = "/dev/shm/facepipe"
@@ -2366,6 +2369,7 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(DATA, "snaps", url.path[6:])
             if os.path.exists(path):
                 return self.file(path)
+            return self.send(200, SNAP_GONE, "image/svg+xml")  # deleted by its retention (D-049), not missing
         if url.path.startswith("/photo/"):
             path = first_photo(unquote(url.path[7:]))
             if path:
@@ -2820,6 +2824,11 @@ def selftest_http():
     assert code == 404 and b"Page not found" in body and "script-src 'self'" in hd["Content-Security-Policy"]
     assert get("/no-such-page")[0] == 404 and get("/rec/2026-11-06/000000_clip.mp4", auth=None)[0] == 401
     assert get("/rec/2026-11-06/000000_clip.mp4")[0] == 404
+    # a snapshot deleted by its retention still needs something to show (D-049); an evidence frame or clip does not,
+    # because nothing embeds those in a page
+    gone = get("/snap/2026-09-01/120000_1.bmp")
+    assert gone[0] == 200 and gone[1]["Content-Type"] == "image/svg+xml" and b"snapshot deleted" in gone[2]
+    assert get("/snap/2026-09-01/120000_1.bmp", auth=None)[0] == 401  # still behind sign-in
     for p in ("/", "/live", "/attendance", "/attendance?date=" + day, "/people", "/system"):
         code, hd, body = get(p)
         assert code == 200 and "script-src 'self'" in hd.get("Content-Security-Policy", ""), (p, code)
