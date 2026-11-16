@@ -1,6 +1,6 @@
 # Threat model
 
-The system holds biometric data (face photos, embeddings, snapshots, clips) of real people. In India this falls under the DPDP Act 2023. Gaps are listed plainly.
+The system holds biometric data (face photos, embeddings, snapshots, clips) of real people. In India this falls under the DPDP Act 2023. Gaps are listed plainly. From v1.14.0 it also keeps an embedding of every face it could not identify, in `data/strangers.tsv` (0600), for 30 days from the first sighting, so that the same visitor is counted once (D-047); the face snapshots beside it, in `data/snaps/`, are kept for ever and have no retention rule, which is the larger gap of the two.
 
 | Actor | Entry point | Worst realistic abuse | In place | Gap |
 | --- | --- | --- | --- | --- |

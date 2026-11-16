@@ -520,3 +520,69 @@ Rejected: tuning any of options 2-4 now, on idle-curve data.
 Trade-off: the 15-second bursts stay (three in 31 min, 7.8 and 2.7 minutes apart), and one burst in three over-cools by 16 °C. Both are audible; neither is harmful.
 Revisit if: the faces-present curve in the case comes within 10 °C of the 97 °C throttle (then option 2 or 4), or the bursts annoy whoever sits near the device (then option 3).
 Not settled by this run: why two bursts were released after one interval and the third was not. The release points share no temperature (`thermal-fan-est` 40.75, 41.00 and 27.25 °C), so the governor holds state these columns do not carry; `/etc/nvfancontrol.conf` and the `nvfancontrol` state file would answer it. Nothing depends on the answer today.
+
+## D-047: An unknown face gets a number, kept 30 days, so a day's different faces can be counted
+
+The owner, 2026-11-16, asked for the unique-face count the CCTV system built (their D-064) on this device and on the
+Orin, after the CCTV session proposed it. **No council: the owner's fixed Codex session answers "The 'gpt-6.1-sol'
+model is not supported when using Codex with a ChatGPT account", and the owner's rule is never to override that model.
+The trade-off below (biometric vectors at rest, and for how long) is therefore mine and the owner's, unreviewed by a
+second model.** Worth re-running when that session works.
+
+The count needs faces to be told apart, and this device could not do it: `log_event` wrote `"name":"unknown"` with no
+identity, and the events file keeps no embeddings, so after the fact two unknown visits are indistinguishable. The
+Orin system already solves it, keeping each unknown visit's best embedding and giving it an id that lasts, so its
+count is simply the distinct names plus distinct ids of a day's rows.
+
+Options:
+
+1. Count unknown *visits*, as the website did until now, and call it faces
+2. A number per unknown face, kept in memory only
+3. A number per unknown face, kept in `data/strangers.tsv` for 30 days (chosen)
+4. CCTV's own tally: cluster every detected face in memory, per camera and day, at cosine 0.40
+
+Chosen 3. Option 1 is what the "Unknown faces" card showed, and it was wrong: one visitor who triggers five visits is
+not five faces. Option 2 loses every number when the process restarts, which on this device happens whenever the
+camera drops, so the same visitor would be counted again and the day's figure would climb for free. Option 4 counts
+every detected face rather than every logged visit, which is a different and larger number, needs a second threshold
+beside the one the website already controls, and rests on a cut-off CCTV validated against two people.
+
+What was built: `data/strangers.tsv`, one line per stranger, `id<TAB>first_ts<TAB>v1,...,v512` - the gallery's own
+shape - appended only, never updated, mode 0600. It is read at start and **pruned there**: a vector is kept
+`STRANGER_DAYS` = 30 days from the first sighting and no longer. Matching uses `passes()`, the gallery's own threshold
+and metric, so the one control on the System page governs both, as it does on the Orin. Every decided unknown gets its
+number, repeats included, so the live label ("Unknown #7") and the event line carry the same one. `web.py` counts a
+day's different faces as distinct names plus distinct `unknown_id` and shows it as its own card; the "Unknown faces"
+card now counts faces with the visit count beneath it, and the Attendance page's section is renamed "Unknown visits",
+which is what it lists.
+
+Why 30 days **from the first sighting**, where the Orin measures from the last: `last_ts` keeps a frequent visitor's
+vector alive for as long as they keep coming, which quietly builds a long-lived profile of someone the system never
+identified. `first_ts` is a hard cap per vector, it needs no write after the line is appended (this device runs from a
+microSD card), and the only cost is that a regular unknown visitor becomes a new number after a month, which no day's
+count can see. The divergence from the Orin is deliberate.
+
+What this is not: it counts faces the pipeline **decided and logged**, not every face it saw. A face too brief to
+reach a decision, or one rejected as unclear (D-042), leaves no row and is not counted, so this number is lower than
+CCTV's by design. It also follows the matching threshold: a stricter rule splits one person into several faces and
+raises the count, a looser one merges people and lowers it.
+
+New data at rest, stated plainly: vectors of people who were never identified, for 30 days (`docs/DATA.md`). The
+device already keeps a 112x112 BMP crop of every unknown face in `data/snaps/` **for ever**, which is the stronger
+artifact - anyone can recognise a person from the picture, while the vector needs this same ArcFace model - so the
+exposure this adds is small and bounded, and the snapshots' own lack of a retention rule is the larger gap. The
+attempt stream that already carries embeddings (`json_out`, one line per try) is discarded by the unit
+(`StandardOutput=null`), so this file is the first place a vector is written down on this device.
+
+Proven: `./facepipe --selftest` covers the same face keeping its number from another angle, a different face getting a
+new one, both surviving a restart, and both being dropped a month later with the file rewritten; `python3 web.py
+--selftest` covers the count, including a stranger seen twice counting once and legacy rows with no number counting as
+one face between them.
+Rejected: options 1, 2 and 4 above; and seeding the repeat rule's unknowns from the file at start, because the vector
+on file is the first sighting's, not the logged visit's, so the join would compare against the wrong thing for a gain
+of at most one duplicate event inside a five-minute window.
+Trade-off: a number names a face within its retention window, not for ever - after 30 days the numbering starts again
+and an old number can come back for a different person. Day counts never see it; a reader comparing months would.
+Revisit if: the owner wants faces *detected* rather than visits *logged* (that is option 4, and it needs a validated
+cut-off first), or wants the count available as JSON for another system to collect, as the Orin serves it at
+`/api/unique`.

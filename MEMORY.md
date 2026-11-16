@@ -4,8 +4,9 @@ Snapshot: **2026-11-08 8:41 AM IST**. Volatile state; verify before acting (see 
 
 ## Versions
 
-- `main`: **v1.13.7**, deployed and healthy on the Nano (`facepipe 1.13.7 at 199 frames after 22 s`). Releases are made by the workflow when a merged change raises `VERSION`; the device's update timer (D-031) deploys each one within 10 minutes.
-- This version: pages follow a start or stop of recognition without a manual refresh.
+- `main`: **v1.14.0**, released 2026-11-16. **Not yet verified on the device**: the update timer (D-031) deploys it within 10 minutes of the release, and `deploy.sh` runs `--selftest` and rolls back by itself if it fails, so check `facepipe --version` and `data/status.json` before trusting the number here. Releases are made by the workflow when a merged change raises `VERSION`.
+- This version: an unknown face keeps a number for 30 days (`data/strangers.tsv`, 0600), event lines carry `unknown_id`, and the website counts a day's different faces instead of unknown visits (D-047). Asked for by the owner so this device reports what the Orin and the CCTV system report.
+- Before that (v1.13.7): pages follow a start or stop of recognition without a manual refresh.
 - Earlier in v1.13: token messages no longer assert the repository's visibility (.6); a deploy no longer leaves the source in `/tmp` (.5, `docs/bugs/deploy-left-source-in-tmp.md`); the health warning starts at 90 °C, above the 81 °C this board reaches while simply running (.4); each temperature sensor is judged against its own limits, AO is not critical until 110 °C (.3); the warning names heat or memory and what to do (.2); a private repository is read with a token from `gh_token` (.1, D-044); the website ships compiled as `webapp.so` and a missing file answers 404 (.0, D-043, `docs/bugs/favicon-missing-500.md`).
 - Before that: open pages switch to the maintenance page by themselves (v1.12.3); USB cameras saved by their by-id path (v1.12.1); unknown faces only from a clear view (v1.12.0, D-042); the recognition banner (v1.11.0); RTSP on the local network only (v1.10.1, D-041); user accounts (v1.10.0, D-040); two cameras and video upload (v1.9.0, D-039); the sign-in page (v1.8.0, D-036).
 

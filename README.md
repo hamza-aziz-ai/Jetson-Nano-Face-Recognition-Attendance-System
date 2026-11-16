@@ -53,13 +53,13 @@ It is a native C++ DeepStream application with custom TensorRT post-processing, 
 | 🎥 **Video sources** | Chosen on the website's Cameras page: RTSP/IP cameras (several set up and tested from the page, up to two running at once in one process; forced to TCP), **USB** cameras (MJPEG decoded on NVJPG), **CSI** cameras through the Argus ISP; video files from the command line |
 | 🔍 **Detection** | SCRFD-10G at 640x384 in TensorRT FP16 with a custom decoder for boxes and 5 facial landmarks; adaptive rate: full rate while faces are present, every 6th frame when the scene is empty |
 | 🧭 **Tracking** | NvMultiObjectTracker (IOU): one recognition per person per visit, not per frame |
-| 🧠 **Recognition** | Umeyama alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine or L2 matching; unknown tracks retried up to 5 times |
+| 🧠 **Recognition** | Umeyama alignment to the ArcFace 5-point template, `w600k_r50` embeddings, cosine or L2 matching; unknown tracks retried up to 5 times; a face nobody enrolled keeps a number for 30 days, so the same visitor counts once (D-047) |
 | 👤 **Enrollment** | Registration by invitation link from any phone on the network, with consent and admin approval; or photos in `gallery/<name>/` and one command. The running service picks up the new gallery by itself |
 | 📋 **Attendance** | Per-day event log with first and last seen, sightings, match score and a face snapshot; CSV export |
 | 🎞️ **Video upload** | Recognition on a recorded video (H.264/H.265, up to 1080p and 30 min): annotated copy to download with the names found; live cameras always go first; never counted as attendance; deleted after 7 days |
 | 🎬 **Evidence** | Per event: a 1080p image with box and name (NVJPG) and an H.264 clip around the event (NVENC); weekly rotation when storage fills |
 | 📡 **Live video** | Boxes and names drawn on the video; MJPEG live view in the dashboard (encoded only while watched) and an RTSP stream for VLC or an NVR on the local network (refused from the internet, D-041) |
-| 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload, Users and System pages; present, absent and unknown per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
+| 🖥️ **Website** | Overview, Live, Attendance, People, Cameras, Video upload, Users and System pages; present, absent, different faces and unknown visits per day, search and sort, CSV and print; start, stop and restart recognition; Python standard library only, works offline |
 | 👥 **Users** | Admins and viewers added by email or phone number; viewers see everything and change nothing (e.g. family); single-use set-password links, no email or SMS needed |
 | 🔐 **Security** | PBKDF2-hashed login, separate RTSP login, Content-Security-Policy with per-response nonces, CI that blocks secrets, private IPs and biometric files |
 | ⚙️ **Operations** | Device health on the website (temperatures, CPU/GPU load, fan, memory) with warnings; frame watchdog, bounded clean shutdown, daily rotated logs, automatic updates with health check and rollback |

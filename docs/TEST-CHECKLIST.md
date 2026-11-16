@@ -2,6 +2,12 @@
 
 A change is done when CI is green and the relevant device checks pass, with the real output recorded here or in the commit.
 
+## Unknown faces keep their number (D-047)
+
+- `./facepipe --selftest` and `python3 web.py --selftest` cover the rule itself: the same face from another angle keeps its number, a different face gets a new one, both survive a restart, both are dropped after 30 days, and the day's count treats one stranger's repeat visits as one face.
+- On the device: stand in front of the camera unenrolled, leave, come back after the 300 s repeat window. Both visits must carry the same `unknown_id` in `data/events-<today>.jsonl`, the live view must read "Unknown #N" with that number, the Overview's "Different faces" card must not rise for the second visit, and "Unknown faces" must read 1 with "2 visits" beneath it.
+- `ls -l data/strangers.tsv` must show mode 0600, and the file must never appear in `git status` (`ci/scan.sh` refuses any `.tsv`).
+
 ## CI (GitHub Actions, every push and pull request)
 
 | Job | What it runs | Pass looks like |
