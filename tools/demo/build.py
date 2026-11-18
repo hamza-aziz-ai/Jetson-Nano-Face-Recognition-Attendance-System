@@ -248,7 +248,9 @@ if not SA:
 else:
     page = page.replace("<title>Overview &middot; Face Attendance</title>",
                         "<title>Face Attendance \u00b7 Demo</title>", 1)
-page = page.replace('<a class="skip" href="#main">', banner + '<a class="skip" href="#main">', 1)
+# inside the content column: the sidebar is fixed, so a banner before it would run underneath
+assert page.count('<div class="shell">') == 1
+page = page.replace('<div class="shell">', '<div class="shell">' + banner, 1)
 page = page + shim + "<script>\n" + js + "\n</script>\n" + switcher
 
 out = S / ("nano_site.html" if SA else "nano.html")
