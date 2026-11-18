@@ -49,10 +49,13 @@ for name in PEOPLE:
     "unknown": 5, "step": 2, "cameras": [{"id": "cam0", "name": "Entrance", "fps": 15.0, "up": True},
                                          {"id": "cam1", "name": "Corridor", "fps": 14.8, "up": True}]}))
 (data / "cameras.json").write_text(json.dumps(
-    {"source": "usb", "csi": "0", "usb": "/dev/video0", "size": "1280x720",
-     "rtsp": [{"id": "a1b2c3d4", "name": "Corridor", "url": "rtsp://ops:secret@cam-corridor.site:554/stream1",
+    {"source": "rtsp", "csi": "0", "usb": "/dev/video0", "size": "1280x720",
+     "rtsp": [{"id": "a1b2c3d4", "name": "Entrance", "url": "rtsp://ops:secret@cam-entrance.site:554/stream1",
+               "enabled": True},
+              {"id": "e5f6a7b8", "name": "Corridor", "url": "rtsp://ops:secret@cam-corridor.site:554/stream1",
                "enabled": True}]}))
-(data / "cameras.active").write_text("usb:/dev/video0 1280 720\n")
+(data / "cameras.active").write_text("rtsp://ops:secret@cam-entrance.site:554/stream1 1920 1080 a1b2c3d4\n"
+                                     "rtsp://ops:secret@cam-corridor.site:554/stream1 1920 1080 e5f6a7b8\n")
 (data / "matching.json").write_text(json.dumps({"metric": "cosine", "cosine": 0.50, "l2": 0.90}))
 
 env = dict(os.environ, FACEPIPE_DATA=str(data), FACEPIPE_DIR=str(work), FACEPIPE_GALLERY=str(data / "gallery.tsv"),
@@ -62,7 +65,34 @@ sys.path.insert(0, str(REPO))
 import web  # noqa: E402
 web.write_auth(str(work / "web_auth"), "demo", PW)
 
-srv = subprocess.Popen([sys.executable, str(REPO / "web.py")], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+# The System page reads this machine's /proc and /sys, which would print a 20-core, 2 TB "microSD card" on a page
+# headed Jetson Nano. The server therefore runs through a wrapper that replaces the four host readers with a board's
+# values before serving. The page itself is still rendered by web.py's own code, from its own template.
+runner = work / "serve_as_board.py"
+runner.write_text("""import sys
+sys.path.insert(0, %r)
+import web
+
+web.device_health = lambda: {
+    "temps": {"AO": 57.5, "CPU": 52.5, "GPU": 49.0, "PLL": 50.0, "PMIC-Die": 48.0, "thermal": 51.5},
+    "mem": {"total": 3964, "available": 1402, "swap_total": 1982, "swap_used": 0},
+    "cpu": [38, 44, 35, 41], "cpu_mhz": 1479, "gpu": 37, "gpu_mhz": 921,
+    "fan": {"pct": 42, "rpm": 3120}, "uptime_h": 6.4, "level": "ok"}
+web.disk = lambda path: ("21.4 GB free of 29.8 GB" if "rec" in str(path) else "18.2 GB free of 59.1 GB")
+web.service_state = lambda: "active"
+_logs = {
+    "facepipe.log": ["[18-11-2026] 08:40:58.114 AM, Wednesday [INFO] facepipe 1.15.0 starting, data data",
+                     "[18-11-2026] 08:41:03.882 AM, Wednesday [INFO] gallery: 6 people, 27 embeddings",
+                     "[18-11-2026] 08:41:07.004 AM, Wednesday [INFO] Entrance and Corridor: 1920x1080 at 15 fps",
+                     "[18-11-2026] 08:52:11.620 AM, Wednesday [INFO] unknown #1 logged from Corridor (cosine 0.33)",
+                     "[18-11-2026] 03:58:13.441 PM, Wednesday [INFO] mei logged from Entrance (cosine 0.68)"],
+    "update.log": ["[18-11-2026] 03:50:02.118 PM, Wednesday [INFO] no newer release than v1.15.0"]}
+web.tail = lambda path, n: _logs.get(str(path).split("/")[-1].split(chr(92) + chr(92))[-1], [])[-n:]
+
+srv = web.Server(("127.0.0.1", web.PORT), web.Handler)
+srv.serve_forever()
+""" % str(REPO))
+srv = subprocess.Popen([sys.executable, str(runner)], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 time.sleep(3)
 base = "http://127.0.0.1:8731"
 jar = http.cookiejar.CookieJar()
