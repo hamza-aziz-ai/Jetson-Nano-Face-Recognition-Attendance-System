@@ -679,3 +679,23 @@ Trade-off: the pictures that back a decision are gone after a month, so a disput
 score and the name but no image. That is the point of a retention rule, and the owner can raise the window per device.
 Revisit if: the owner wants the attendance rows to age out too (that is a second rule, over `events-*.jsonl`, and it
 changes what the site keeps as its record), or a client's contract names a different period.
+
+## D-050: a public demo of the website at /demo/, served by a Worker route (owner)
+
+Context: the owner needs something a recruiter can open and click. The website itself cannot be it - it needs a sign-in (D-036), it holds a household's faces and attendance, and it is only up while the Nano is, which this week it was not for several hours.
+
+Options:
+
+1. Screenshots or a video in the README
+2. The real website with a guest account
+3. A copy of the website's own pages, served as one static file at `/demo/`, with one recorded day in place of a device (chosen)
+4. A second Nano, or the website running on a server somewhere, for visitors
+
+Chosen 3, and the copy is made by running the real thing: `tools/demo/capture.py` seeds a temporary data directory, starts **this repository's `web.py`** against it, signs in, and saves all eight pages exactly as the server rendered them. `tools/demo/build.py` then stitches their `<main>` bodies into one page, keeps the real stylesheet and script, and routes the navigation through the URL hash. So the demo is the product's own HTML, not a drawing of it, and it is regenerated rather than maintained.
+
+**No photograph of a person is in it.** Every face - the profile photos on People and Attendance, the snapshots, and what the Frame and Clip links open - is a subject drawn in the page: a pixelated figure, cell by cell, with no cell boundary smoothed and no feature to mistake for a likeness, the way a published evidence still protects the person in it. It differs per person so the pages stay readable. This is the owner's rule for biometric data (D-049's companion: a picture of a face never leaves the device), kept even where the faces are invented.
+
+It is attached by a **Worker route** on `<hostname>/demo*`, not a Worker Custom Domain, which would take over the whole hostname instead of the website. The route is answered at Cloudflare's edge, so the demo stays up when the Nano is off - as it was this afternoon - and it needs no DNS record. `/demo*` is outside the maintenance Worker's page addresses (D-037), so the two do not collide, and outside `/api/`, so the website's own polling is untouched.
+
+Trade-off: `deploy/demo/site/demo/index.html` is a generated file kept in the repository, which will drift from the website unless someone rebuilds it; `deploy.sh` publishes what is in the folder and never rebuilds. The two commands are in the README. A drifted demo shows an older website rather than a broken one.
+Revisit if: the website grows a page the capture cannot reach, or the owner wants the demo on a hostname of its own (that needs a DNS record, which the signed-in wrangler token cannot create).

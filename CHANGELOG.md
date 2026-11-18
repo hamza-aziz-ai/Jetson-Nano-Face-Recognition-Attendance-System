@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- A public demo of the website at `/demo/`, captured from the real `web.py` and served by a Cloudflare Worker route before the tunnel, with every face drawn in the page (D-050).
+
 ## [1.15.0] - 2026-11-16
 
 ### Added

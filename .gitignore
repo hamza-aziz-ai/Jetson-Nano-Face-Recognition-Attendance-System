@@ -19,3 +19,4 @@ __pycache__/
 # CI header cache
 .jp/
 deploy/maintenance/.wrangler/
+.wrangler/

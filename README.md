@@ -265,6 +265,21 @@ A custom OpenCV build (for example with CUDA) instead of the system one: `make a
 
 </details>
 
+## The public demo
+
+A copy of the website's own pages, with one recorded day in place of a device, is published at
+[attendance.hamzaaziz.dev/demo/](https://attendance.hamzaaziz.dev/demo/) (D-050). It is captured from this
+repository's `web.py`, so it is the product's own HTML; every face in it is drawn in the page, pixel by pixel, and no
+photograph of a person is in it. A Worker route serves it before the tunnel, so it is up whether or not the Nano is.
+
+```bash
+python3 tools/demo/capture.py              # run the real website against a seeded data dir, save its eight pages
+STANDALONE=1 python3 tools/demo/build.py   # stitch them into deploy/demo/site/demo/index.html
+sh deploy/demo/deploy.sh attendance.hamzaaziz.dev
+```
+
+Nothing rebuilds it automatically: `deploy.sh` publishes whatever is in `deploy/demo/site/`.
+
 ## Validation status
 
 Every row was verified on a Jetson Nano 4 GB with real cameras; [docs/TEST-CHECKLIST.md](docs/TEST-CHECKLIST.md) has the commands and output.
