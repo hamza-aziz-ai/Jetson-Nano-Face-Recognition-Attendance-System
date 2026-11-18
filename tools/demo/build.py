@@ -105,7 +105,8 @@ def room(w, h):
 def scene(label, known, w=640, h=360):
     """One frame as the camera recorded it: the box frames the head itself, which is where the detector put it."""
     c = TEAL if known else AMBER
-    x, y, sc = w / 2.0, h - 36, 2.1
+    sc = h / 171.4          # the subject scales with the frame: 2.1 in a 640x360 still, more in a live view
+    x, y = w / 2.0, h - h * 0.07
     m = 2.5 * sc
     bx, by = x - HX * sc - m, y + (HCY - HY) * sc - m
     bw, bh = 2 * HX * sc + 2 * m, 2 * HY * sc + 2 * m
@@ -166,7 +167,8 @@ logo = svg_uri(32, 32, '<rect width="32" height="32" rx="7" fill="#2457c5"/><cir
 page = page.replace('src="/static/logo.svg"', 'src="%s"' % logo)
 page = re.sub(r'<link rel="icon"[^>]*>', "", page)
 
-scenes = {"known": scene("sofia", True), "stranger": scene("Unknown #2", False)}
+scenes = {"known": scene("sofia", True), "stranger": scene("Unknown #2", False),
+          "live": scene("sofia", True, 960, 540)}
 shim = """
 <script>
 window.__SCENES__ = %s;
@@ -217,6 +219,13 @@ switcher = """
     }
   });
   document.getElementById("demo-ev-x").onclick = () => document.getElementById("demo-ev").close();
+  // app.js points the live image at /live on this device; hold it on the drawn frame instead
+  const liveimg = document.getElementById("liveimg");
+  if (liveimg) {
+    const hold = () => { if (liveimg.getAttribute("src") !== window.__SCENES__.live) liveimg.src = window.__SCENES__.live; };
+    hold();
+    setInterval(hold, 1000);
+  }
   document.addEventListener("submit", e => { e.preventDefault(); }, true);
   show(location.hash.slice(1));
 })();
