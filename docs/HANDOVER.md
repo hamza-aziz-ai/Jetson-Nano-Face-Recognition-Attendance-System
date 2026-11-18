@@ -2,6 +2,14 @@
 
 Read first: docs/ARCHITECTURE.md, docs/CONSTRAINTS.md, docs/DECISIONS.md. Newest entry on top.
 
+## 18 Nov 2026, 05:30 PM
+
+### Done
+- **A public demo of the website, live at <https://attendance.hamzaaziz.dev/demo/>** (D-050). Captured from this repository's own `web.py`: a seeded data directory, the real server, all eight pages saved as it rendered them, stitched into one page that keeps the real stylesheet and script and routes its navigation through the URL hash. Every face in it is drawn in the page, cell by cell, as a pixelated subject with no feature to mistake for a likeness - no photograph of a person is in it. A Worker route on `/demo*` answers it at Cloudflare's edge, so it was up this afternoon while the board itself was off the network.
+
+### Next
+- Rebuild it after a website change: `python3 tools/demo/capture.py`, then `STANDALONE=1 python3 tools/demo/build.py`, then `sh deploy/demo/deploy.sh attendance.hamzaaziz.dev`. Nothing rebuilds it automatically.
+
 ## The fan measured in the case, and the thermal question closed: 2026-11-10 (model: Claude Opus 5)
 
 No release, documents only.

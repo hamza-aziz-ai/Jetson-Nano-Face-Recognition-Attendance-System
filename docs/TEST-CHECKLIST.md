@@ -179,3 +179,4 @@ v1.8.0 check on the Nano (2026-11-07):
 | --- | --- | --- |
 | Sign-in, cookie, tampering, expiry, redirects, sign-out, new password, restart | `python3 web.py --selftest` | selftest ok |
 | Real pages | test instance on port 8099 with a generated test login | `/` 303 to `/login?next=%2F`; `/login` 200; `/nope` 404 page; sign-in 303 to `/system` with `HttpOnly; SameSite=Lax`; `/system` 200 with Sign out and its form token |
+- The public demo (D-050), proven on 18 Nov 2026 and repeatable: `curl -s -o /dev/null -w '%{http_code}' https://attendance.hamzaaziz.dev/demo/` must be **200** while `https://attendance.hamzaaziz.dev/` answers whatever the Nano is doing, and `/api/status` must never be served by the Worker. In a browser: Attendance must show 5 present, 9 different faces and 4 unknown faces, each row must carry a drawn face, and Frame and Clip must open the evidence dialog. Rebuild before deploying if `web.py` or `web/` has changed.
